@@ -1,5 +1,7 @@
 # IGW Thread Concentration Lab
 
+[![lint](https://github.com/solo-io/igw-thread-concentration-lab/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/solo-io/igw-thread-concentration-lab/actions/workflows/lint.yml)
+
 A self-contained k3d lab that reproduces, measures, and lets you tune **Istio Ingress Gateway thread concentration under low client connection cardinality**: the production failure mode where aggregate gateway CPU looks fine but a small number of worker threads saturate, driving tail latency.
 
 The lab is built around four hypotheses about the mechanism and the levers that move it. Running it, reading the dashboards, and reading the per-scenario output should leave you with a working mental model of:
