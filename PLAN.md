@@ -12,7 +12,7 @@ The lab tests four hypotheses about the mechanism and four canonical tuning leve
 
 **Local k3d cluster.** The mechanism we are studying (HTTP/2 streams pinned to Envoy worker threads when client connection cardinality is low) is at the Envoy data-plane level. It does not depend on cloud or LB-specific infrastructure. We can drive low connection cardinality directly via the load generator's `-c` parameter, regardless of how clients arrive in production.
 
-Per the [Envoy threading model documentation](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/threading_model), each accepted TCP connection is assigned to a single worker thread for its lifetime, regardless of how it arrived. That is the property under test.
+Per the [Envoy threading model documentation](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310), each accepted TCP connection is assigned to a single worker thread for its lifetime, regardless of how it arrived. That is the property under test.
 
 **What this lab does NOT reproduce:** L4 load-balancer hash dynamics (e.g., AWS NLB zonal affinity collapsing client connections to one per client) or production-magnitude RPS (1M+ RPS). Those are separate axes from concentration. Reproducing the NLB-specific trigger would need an EKS cluster behind a real NLB; you would build that as a v2 of this lab if needed. The rest of the design works on a developer laptop.
 
@@ -24,7 +24,7 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Claim:** With Istio's default `max_concurrent_streams: 65536` (per the [Istio Pilot environment variable reference for `PILOT_HTTP2_MAX_CONCURRENT_STREAMS`](https://istio.io/latest/docs/reference/commands/pilot-discovery/#envvars)), a small number of client TCP connections plus many concurrent HTTP/2 streams produces hot worker threads and rising tail latency, while aggregate gateway CPU stays moderate.
 
-**Reasoning:** Per the [Envoy threading model documentation](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/threading_model), each accepted TCP connection is permanently assigned to one worker thread, and that thread handles every HTTP/2 stream multiplexed on that connection. Total stream throughput on a connection is therefore bounded by one worker thread's CPU budget, regardless of how many other workers are idle. If clients open few connections, streams pile up on a few threads and saturate them while the rest of the pod's CPU sits idle.
+**Reasoning:** Per the [Envoy threading model documentation](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310), each accepted TCP connection is permanently assigned to one worker thread, and that thread handles every HTTP/2 stream multiplexed on that connection. Total stream throughput on a connection is therefore bounded by one worker thread's CPU budget, regardless of how many other workers are idle. If clients open few connections, streams pile up on a few threads and saturate them while the rest of the pod's CPU sits idle.
 
 **Confirmation signal:** CV of `envoy_http_downstream_cx_active` across IGW pods rises by a multiple (5x or more) above the baseline. p99 listener latency rises. Aggregate `process_cpu_seconds_total` rate stays moderate.
 
@@ -166,7 +166,7 @@ These are not failure modes of the lab; they are findings worth knowing if you s
 
 ### Upstream documentation
 
-- [Envoy threading model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/threading_model)
+- [Envoy threading model](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310)
 - [Envoy HTTP Connection Manager protocol options (`max_requests_per_connection`)](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#envoy-v3-api-field-config-core-v3-httpprotocoloptions-max-requests-per-connection)
 - [Envoy HTTP/2 protocol options (`max_concurrent_streams`, `initial_stream_window_size`, `initial_connection_window_size`)](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#config-core-v3-http2protocoloptions)
 - [Envoy HCM stats reference](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/stats)
@@ -183,9 +183,8 @@ These are not failure modes of the lab; they are findings worth knowing if you s
 
 ### Solo product documentation
 
-- [Solo Enterprise for Istio: ambient mode](https://docs.solo.io/gloo-mesh-enterprise/latest/ambient/)
-- [Solo Enterprise for Istio waypoint overview](https://docs.solo.io/gloo-mesh-enterprise/latest/ambient/about/components/waypoint/)
-- [Solo Enterprise for Istio waypoint sizing guidance](https://docs.solo.io/gloo-mesh-enterprise/latest/setup/install/ambient/sizing/)
+- [Solo Gloo Mesh: ambient mode overview](https://docs.solo.io/gloo-mesh/latest/ambient/)
+- [Solo Gloo Mesh: ambient architecture (ztunnel and waypoint components)](https://docs.solo.io/gloo-mesh/latest/ambient/about/architecture/)
 
 ### Related public GitHub issues
 

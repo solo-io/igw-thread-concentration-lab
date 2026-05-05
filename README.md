@@ -18,7 +18,7 @@ For the deeper hypothesis design and scenario rationale, see [`PLAN.md`](PLAN.md
 
 Source: [`diagrams/mechanism.mmd`](diagrams/mechanism.mmd).
 
-Per the [Envoy threading model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/threading_model), every accepted TCP connection is permanently assigned to one Envoy worker thread for its lifetime. All HTTP/2 streams multiplexed on that connection are processed by that one thread. There is no work-stealing.
+Per the [Envoy threading model](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310), every accepted TCP connection is permanently assigned to one Envoy worker thread for its lifetime. All HTTP/2 streams multiplexed on that connection are processed by that one thread. There is no work-stealing.
 
 That is the whole story, and everything in this lab is a consequence:
 
@@ -341,13 +341,13 @@ The lab is intentionally scoped tight. Things that would be valuable but aren't 
 
 ## Further reading
 
-- [Envoy threading model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/threading_model)
+- [Envoy threading model](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310)
 - [Envoy HCM stats](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/stats)
 - [Envoy HTTP/2 protocol options](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#config-core-v3-http2protocoloptions)
 - [Envoy outlier detection](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/outlier)
 - [Istio ambient overview](https://istio.io/latest/docs/ambient/overview/)
 - [Istio HBONE protocol](https://istio.io/latest/docs/ambient/architecture/hbone/)
 - [Istio waypoint usage](https://istio.io/latest/docs/ambient/usage/waypoint/)
-- [Solo Enterprise for Istio: ambient](https://docs.solo.io/gloo-mesh-enterprise/latest/ambient/)
+- [Solo Gloo Mesh: ambient](https://docs.solo.io/gloo-mesh/latest/ambient/)
 - [Istio issue #58114 — HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)
 - [RFC 9113 (HTTP/2)](https://datatracker.ietf.org/doc/html/rfc9113)
