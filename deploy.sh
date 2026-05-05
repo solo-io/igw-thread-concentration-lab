@@ -122,15 +122,17 @@ if kubectl --context "${CONTEXT}" get deployment istiod -n "${NAMESPACE_ISTIO}" 
     echo "[3/9] Istio (control plane + IGW) already installed"
 else
     echo "[3/9] Installing Istio ${ISTIO_VERSION} (ambient profile + IGW, replicas=${IGW_REPLICAS}, cpu=${IGW_CPU})..."
-    # Pin Envoy worker concurrency to 1 globally. Auto-detection from CPU
-    # limits is unreliable across hosts (k3d, kind, EKS, etc. all behave
-    # subtly differently). Pinning makes the "6 replicas, 1 worker thread
-    # each = 6 worker threads in total" architecture in the README a
-    # guarantee instead of a hope. The verification step below will fail
-    # loudly if the pin doesn't take.
+    # Pin Envoy worker concurrency explicitly, derived from IGW_CPU.
+    # Auto-detection from CPU limits is unreliable across hosts (k3d,
+    # kind, EKS all behave subtly differently). Coupling concurrency to
+    # IGW_CPU keeps "worker threads per pod" a single source of truth:
+    # set IGW_CPU=N in config.env to get N worker threads per pod, with
+    # the verification step below failing loudly if the pin doesn't
+    # take. (Required by scenario 13, which needs concurrency >= 2 to
+    # exercise within-pod connection balance.)
     "${ISTIOCTL}" install --context "${CONTEXT}" \
         --set profile=ambient \
-        --set meshConfig.defaultConfig.concurrency=1 \
+        --set "meshConfig.defaultConfig.concurrency=${IGW_CPU}" \
         --set values.cni.cniConfDir=/var/lib/rancher/k3s/agent/etc/cni/net.d \
         --set values.cni.cniBinDir=/bin \
         --set components.ingressGateways[0].name=istio-ingressgateway \
