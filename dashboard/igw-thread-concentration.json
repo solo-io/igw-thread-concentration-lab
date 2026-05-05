@@ -10,7 +10,7 @@
   "liveNow": false,
   "panels": [
     {
-      "title": "CV(downstream_cx_active) across IGW pods (HOTSPOT KILLER QUERY)",
+      "title": "CV(downstream_cx_active) across IGW pods (leading indicator)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -152,7 +152,7 @@
       ]
     },
     {
-      "title": "Flow control paused (Q2 cause #1, H-D)",
+      "title": "Flow control paused (secondary cause #1, H-D)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -165,7 +165,7 @@
         "y": 14
       },
       "id": 6,
-      "description": "Rate of upstream flow_control_paused_reading_total. Non-zero = HTTP/2 window saturation. Zero at intra-cluster RTT (refutes brief's Q2 #1 framing at this scale).",
+      "description": "Rate of upstream flow_control_paused_reading_total. Non-zero = HTTP/2 window saturation. Zero at intra-cluster RTT would refute H-D at this scale.",
       "targets": [
         {
           "expr": "rate(envoy_cluster_upstream_flow_control_paused_reading_total{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}[1m])",
@@ -175,7 +175,7 @@
       ]
     },
     {
-      "title": "Upstream cx_overflow + rq_pending_overflow (Q2 cause: pool saturation)",
+      "title": "Upstream cx_overflow + rq_pending_overflow (secondary cause: pool saturation)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -202,7 +202,7 @@
       ]
     },
     {
-      "title": "Upstream bytes buffered (Q2 cause #2: per_connection_buffer_limit_bytes)",
+      "title": "Upstream bytes buffered (secondary cause #2: per_connection_buffer_limit_bytes)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -235,7 +235,7 @@
       }
     },
     {
-      "title": "ztunnel: TCP connection rate per node (Q4 ambient HBONE)",
+      "title": "ztunnel: TCP connection rate per node (ambient HBONE path)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",

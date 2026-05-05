@@ -4,8 +4,9 @@
 // Why this exists: off-the-shelf load testers (fortio, h2load, hey, oha,
 // k6 in default mode) have one HTTP/2 connection per worker and queue when
 // the server's SETTINGS_MAX_CONCURRENT_STREAMS limit is reached. They do
-// not validate the brief's claim that reducing max_concurrent_streams
-// forces a "smart" client to open additional TCP connections.
+// not exercise the "smart client" behavior the lab needs to test, where a
+// reduced max_concurrent_streams cap forces the client to open additional
+// TCP connections instead of queueing.
 //
 // h2dial uses the canonical Go pattern: many goroutines share ONE
 // http.Client with ONE http2.Transport. The Transport's clientConnPool

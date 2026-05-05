@@ -1,4 +1,4 @@
-# Q2: grpcbin backend for the gRPC variant scenario.
+# grpcbin backend for the gRPC variant scenario (scenario 12).
 #
 # moul/grpcbin exposes the GRPCBin service on port 9000 (HTTP/1) and
 # port 9001 (gRPC over h2c). Reflection is enabled, so ghz can introspect

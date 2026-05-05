@@ -299,7 +299,7 @@ The build phase surfaced these gotchas. They are now handled by the scripts, but
 - **Fortio HTTP/2 flag is `-h2`** (lowercase), not `-H2`.
 - **Istio IGW comes with an HPA at `minReplicas: 1`**. Reconciles to 1 replica during low-CPU scenarios. `deploy.sh` deletes it.
 - **Default `proxyStatsMatcher` excludes connection-level stats**. Istio 1.18+ filters `downstream_cx_*`, `flow_control_*`, listener stats by default. `deploy.sh` patches the IGW with a broader `inclusionRegexps`.
-- **`istio-proxy` is distroless** (no `curl`). Use `pilot-agent request GET <path>` for admin queries.
+- **`istio-proxy` ships without `curl`**. Use `pilot-agent request GET <path>` for admin queries.
 - **Gateway API CRDs not installed by default**. Required for the waypoint resource. `deploy.sh` installs `kubernetes-sigs/gateway-api` v1.2.1.
 - **IGW listener stat prefix has a trailing semicolon**: `http.outbound_0.0.0.0_8080;`. Stat queries assuming no semicolon return zeros silently.
 - **`grafana-image-renderer` plugin is amd64-only**. Linux-arm64 hosts (Apple Silicon) must use manual screenshots.

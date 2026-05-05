@@ -1,4 +1,4 @@
-# Scenario 8: Q2 cause #2 -- per_connection_buffer_limit_bytes
+# Scenario 8: secondary cause #2 -- per_connection_buffer_limit_bytes
 #
 # Default Envoy listener per_connection_buffer_limit_bytes is 1 MiB. With
 # many concurrent streams sharing a connection at high byte throughput,
@@ -6,9 +6,9 @@
 # can drain it; Envoy applies backpressure (paused reads from upstream)
 # and tail latency rises.
 #
-# This scenario raises the listener buffer to 4 MiB (the brief's
-# recommended starting point). Compared to scenario 2 (default 1 MiB),
-# we look for differences in:
+# This scenario raises the listener buffer to 4 MiB, a common starting
+# point for high-byte-throughput production gateways. Compared to
+# scenario 2 (default 1 MiB), we look for differences in:
 #   - upstream_cx_rx_bytes_buffered (cluster-side, may drop)
 #   - upstream_cx_tx_bytes_buffered (cluster-side)
 #   - listener.0.0.0.0_8080.downstream_cx_length_ms p99

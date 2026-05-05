@@ -18,8 +18,9 @@
 #
 # Refutation criterion: if flow_control_paused never appeared in scenario
 # 2, then there was no window saturation to fix. Per PLAN.md, that would
-# be the most consequential refutation since it would weaken the brief's
-# Q2 lead claim.
+# be the most consequential refutation since H-D is the lab's most
+# specific claim about a non-obvious cause of latency at low connection
+# cardinality.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:

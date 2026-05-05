@@ -10,7 +10,7 @@
 #      every 5s during the measure window).
 #   5. Run the load gen twice (warmup + measure; per learning L003).
 #   6. Stop the CPU sampler.
-#   7. Capture all 9 brief metrics + concentration ratio per pod.
+#   7. Capture the 9 core metrics + concentration ratio per pod.
 #   8. Capture per-thread CPU snapshots from each IGW pod.
 #   9. Render the Grafana dashboard for this measure window via the
 #      render API and save the PNG (handled in the second pass once the
@@ -107,7 +107,7 @@ all_igw_pods() {
     kctl get pod -n "${NAMESPACE_ISTIO}" -l app=istio-ingressgateway -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
 }
 
-# Waypoint pods (multi-replica per Q3). Same exec mechanism as IGW pods.
+# Waypoint pods (3 replicas, scaled up after deploy). Same exec mechanism as IGW pods.
 all_waypoint_pods() {
     kctl get pod -n "${NAMESPACE_APP}" -l gateway.istio.io/managed=istio.io-mesh-controller -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
 }
@@ -172,7 +172,7 @@ cv_across_pods() {
     }'
 }
 
-# Capture all 9 brief metrics + concentration ratio + listener latency
+# Capture the 9 core metrics + concentration ratio + listener latency
 # histogram. Output in <out>/<metric>_per_pod.txt.
 capture_metrics() {
     local out="$1"
@@ -256,11 +256,11 @@ capture_metrics() {
     cv="$(cv_across_pods "${LISTENER_PREFIX}.downstream_cx_http2_total")"
     echo "  CV(downstream_cx_http2_total across pods) = ${cv}" | tee "${out}/cv.txt"
 
-    # Q7: also capture CV(downstream_cx_active) gauge -- this is the brief's
-    # "killer query" verbatim. The gauge value is sampled post-run so it
-    # may be near-zero if connections closed cleanly; for the live-trend
-    # version see the Grafana dashboard's CV panel which queries
-    # cx_active over a moving window.
+    # Also capture CV(downstream_cx_active) gauge: this is the leading-
+    # indicator query the Grafana dashboard uses live. The gauge is
+    # sampled post-run so it may be near-zero if connections closed
+    # cleanly; for the live-trend version see the Grafana dashboard's
+    # CV panel which queries cx_active over a moving window.
     local cv_active
     cv_active="$(cv_across_pods "${LISTENER_PREFIX}.downstream_cx_active")"
     echo "  CV(downstream_cx_active across pods, post-run gauge) = ${cv_active}" | tee -a "${out}/cv.txt"
@@ -583,7 +583,7 @@ if [[ -f "${ENVOYFILTERS}/scenario10-rotation.yaml" ]]; then
 fi
 
 if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "11-realistic-filters"; then
-    # Q1: enable JWT validation on the IGW listener for this scenario.
+    # Enable JWT validation on the IGW listener for this scenario.
     # h2dial sends the Istio demo JWT (publicly published, stable token).
     # Validation runs in PERMISSIVE mode (no AuthorizationPolicy paired),
     # AuthorizationPolicy enforces it), so the filter runs and incurs
@@ -638,7 +638,7 @@ if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "1
     kctl delete -f "${MANIFESTS}/11-jwt-auth.yaml" --ignore-not-found >/dev/null 2>&1 || true
 fi
 
-# Q2: gRPC variant via ghz + grpcbin. Single grpc.ClientConn (--connections 1)
+# gRPC variant via ghz + grpcbin. Single grpc.ClientConn (--connections 1)
 # models real-world grpc-go single-ClientConn behavior: streams queue at the
 # server stream cap rather than driving the transport to dial. Compare to
 # scenario 02-trigger (h2dial-shared) and 02-fortio (fortio-fixed-pool).
@@ -772,7 +772,7 @@ fi
 S6_CV="$(read_cv "${RESULTS_DIR}/06-waypoint-baseline/cv.txt" 2>/dev/null || echo 0)"
 S7_CV="$(read_cv "${RESULTS_DIR}/07-waypoint-trigger/cv.txt" 2>/dev/null || echo 0)"
 echo ""
-echo "  Q4 (waypoint mechanism transfer):"
+echo "  Waypoint mechanism transfer:"
 echo "     CV at IGW pods, baseline = ${S6_CV}, trigger = ${S7_CV}"
 # Waypoint-side CV: the waypoint listener stat prefix is discovered at
 # the same time as the IGW prefix during the build phase; here we read

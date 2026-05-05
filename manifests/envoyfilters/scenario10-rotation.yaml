@@ -1,9 +1,10 @@
-# Scenario 10: Q2 cause #5 -- connection rotation (mTLS handshake cost proxy)
+# Scenario 10: secondary cause #5 -- connection rotation (mTLS handshake cost proxy)
 #
-# The brief's claim: "mTLS handshake cost concentrated on rotation -- when
-# 150s rotation hits with fewer connections in flight, each rotation now
-# affects more streams. May appear as periodic spikes timed to the
-# rotation interval."
+# The hypothesis: when connection rotation kicks in (e.g., 150s
+# max_connection_duration) with few connections in flight, each rotation
+# affects a large number of streams at once. The result is periodic
+# latency spikes timed to the rotation interval. With more connections,
+# the rotation cost is amortized; with fewer, it concentrates.
 #
 # We cannot easily reproduce real mTLS handshake cost without setting up
 # self-signed certs, an HTTPS Istio Gateway, and TLS-aware client config.

@@ -21,7 +21,7 @@
 #   6. kube-prometheus-stack (Prometheus + Grafana + ServiceMonitors) for
 #      visualization. PASS/FAIL determination in run-tests.sh uses direct
 #      curl :15000/stats from the gateway pod, not Prometheus.
-#   7. Optional: waypoint resource for scenarios 6 and 7 (Q4 validation).
+#   7. Optional: waypoint resource for scenarios 6 and 7 (mechanism-transfer test).
 #
 # Run-tests is a separate script so the same cluster can be re-used across
 # scenario loops without re-deploying.
@@ -52,8 +52,8 @@ NAMESPACE_LOAD="loadgen"
 NAMESPACE_ISTIO="istio-system"
 NAMESPACE_MONITORING="monitoring"
 
-IGW_REPLICAS=6  # bumped from 3 to 6 (Q9): with more pods, kube-proxy hashing of few connections produces less stable shapes, better matching the "few connections among many pods" regime we want to study.
-IGW_CPU=1  # worker threads = CPU limit; 1 thread per pod, 6 pods = 6 threads total. CPU=1 (vs CPU=2 in v2) so 6 replicas fit within the 24-core k3d cluster alongside ztunnel/grafana/etc.
+IGW_REPLICAS=6  # 6 pods give enough kube-proxy hashing surface to make the "few connections among many pods" regime cleanly observable.
+IGW_CPU=1  # 1 worker thread per pod (concurrency pinned via values.global.proxy.concurrency=1 below); 6 pods = 6 worker threads total. CPU=1 keeps the cluster footprint small enough to fit alongside ztunnel/grafana/etc.
 IGW_HTTP_PORT=18080  # high port to avoid local conflicts
 
 echo "=== IGW Thread Concentration Lab: Deploy ==="
@@ -273,7 +273,7 @@ for i in $(seq 1 30); do
     fi
     sleep 2
 done
-# Q3: bump waypoint replicas to 3 so we can measure CV across waypoint
+# Bump waypoint replicas to 3 so we can measure CV across waypoint
 # pods directly (single-replica = CV undefined). The istiod-managed
 # Deployment is `igw-test-waypoint` in the igw-test namespace.
 WAYPOINT_REPLICAS=3
