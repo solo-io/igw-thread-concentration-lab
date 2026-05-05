@@ -42,7 +42,7 @@ Usage: run-tests.sh [options]
   --skip-eval       Skip the hypothesis-evaluation block at the end (only useful with --only).
   -h | --help       This message.
 
-Without --only, all 13 scenarios run in sequence (~25-30 min).
+Without --only, all 16 scenarios run in sequence (~25-30 min).
 USAGE
             exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -508,10 +508,10 @@ echo ""
 echo "  Removing waypoint label"
 kctl label svc httpbin -n "${NAMESPACE_APP}" istio.io/use-waypoint- >/dev/null 2>&1 || true
 
-# Scenarios 8, 9, 10, 11, 12: see PLAN.md v2.
-# These require manifests added in subsequent build blocks.
-# Scenario invocations will be appended below as those scenarios are wired
-# up in deploy.sh / manifests.
+# Scenarios 8, 9, 10, 11, 12 are guarded on the presence of their
+# respective EnvoyFilter manifests so the suite degrades gracefully if
+# you drop a scenario file. See PLAN.md for the hypothesis each one
+# tests.
 
 if [[ -f "${ENVOYFILTERS}/scenario8-buffers.yaml" ]]; then
     run_h2dial_scenario "08-buffers" \

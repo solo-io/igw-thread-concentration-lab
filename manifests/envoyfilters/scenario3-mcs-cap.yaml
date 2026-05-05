@@ -6,8 +6,12 @@
 # in response to REFUSED_STREAM signals, distributing load across more
 # worker threads.
 #
-# Build-phase refinement A6 (PLAN.md): we sanity-check during the validation
-# pass that fortio actually does this rather than queueing.
+# NOTE: this assumes the load gen actually dials new connections in
+# response to REFUSED_STREAM. fortio with a fixed `-c` does NOT dial
+# (it queues at the application layer). That refutation is itself a
+# finding; see scenario 03-fortio in run-tests.sh, which exercises the
+# same EnvoyFilter against a queueing client to make the comparison
+# explicit.
 #
 # Expected delta from scenario 2:
 #   - downstream_cx_active rises (fortio opens more connections)

@@ -4,8 +4,8 @@
 # Stage 2: distroless static runtime, ~3 MB image.
 #
 # The image is built locally and imported into the k3d cluster via
-# `k3d image import h2dial:local --cluster sefi-8530-01` (no registry
-# round-trip needed).
+# `k3d image import h2dial:local --cluster <cluster-name>` (no registry
+# round-trip needed). deploy.sh handles this end-to-end.
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src

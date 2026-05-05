@@ -33,6 +33,8 @@ set -euo pipefail
 CLUSTER_NAME="igw-tc-lab"
 CONTEXT="k3d-${CLUSTER_NAME}"
 ISTIO_VERSION="1.27.8"
+GATEWAY_API_VERSION="v1.2.1"
+KUBE_PROM_STACK_VERSION="84.5.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ISTIOCTL="${SCRIPT_DIR}/istioctl"
 MANIFESTS="${SCRIPT_DIR}/manifests"
@@ -107,8 +109,15 @@ if kubectl --context "${CONTEXT}" get deployment istiod -n "${NAMESPACE_ISTIO}" 
     echo "[3/9] Istio (control plane + IGW) already installed"
 else
     echo "[3/9] Installing Istio ${ISTIO_VERSION} (ambient profile + IGW, replicas=${IGW_REPLICAS}, cpu=${IGW_CPU})..."
+    # Pin Envoy worker concurrency to 1 globally. Auto-detection from CPU
+    # limits is unreliable across hosts (k3d, kind, EKS, etc. all behave
+    # subtly differently). Pinning makes the "6 replicas, 1 worker thread
+    # each = 6 worker threads in total" architecture in the README a
+    # guarantee instead of a hope. The verification step below will fail
+    # loudly if the pin doesn't take.
     "${ISTIOCTL}" install --context "${CONTEXT}" \
         --set profile=ambient \
+        --set values.global.proxy.concurrency=1 \
         --set values.cni.cniConfDir=/var/lib/rancher/k3s/agent/etc/cni/net.d \
         --set values.cni.cniBinDir=/bin \
         --set components.ingressGateways[0].name=istio-ingressgateway \
@@ -180,7 +189,6 @@ echo "    ${CONCURRENCY}"
 # installed by `istioctl install --set profile=ambient`. Without these,
 # applying the waypoint manifest fails with "no matches for kind Gateway
 # in version gateway.networking.k8s.io/v1".
-GATEWAY_API_VERSION="v1.2.1"
 if kubectl --context "${CONTEXT}" get crd gateways.gateway.networking.k8s.io &>/dev/null; then
     echo "  Gateway API CRDs already installed"
 else
@@ -288,6 +296,7 @@ else
     # can re-enable the plugin by adding `--set grafana.plugins[0]=grafana-image-renderer`.
     helm --kube-context "${CONTEXT}" upgrade --install kube-prom-stack \
         prometheus-community/kube-prometheus-stack \
+        --version "${KUBE_PROM_STACK_VERSION}" \
         --namespace "${NAMESPACE_MONITORING}" \
         --set grafana.adminPassword=admin \
         --set 'grafana.sidecar.dashboards.enabled=true' \

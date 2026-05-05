@@ -78,7 +78,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 2 | Trigger | h2dial `-mode=shared -c 500`, defaults | **H-A** mechanism |
 | 3 | mcs-cap | h2dial `-mode=shared -c 500`, `max_concurrent_streams: 128` | **H-B** smart client (dial on cap) |
 | 4 | mrpc | h2dial `-mode=shared -c 500`, `max_requests_per_connection: 10000` | **H-C** count rotation |
-| 5 | windows | h2dial `-mode=shared`, `/bytes/65536`, windows: 1 MiB | **H-D** flow-control saturation |
+| 5 | windows | h2dial `-mode=shared`, `/bytes/16384`, windows: 1 MiB | **H-D** flow-control saturation |
 | 6 | waypoint-baseline | h2dial `-mode=distinct -c 100`, with waypoint | sanity check the waypoint hop |
 | 7 | waypoint-trigger | h2dial `-mode=shared -c 500`, with waypoint | mechanism transfer through L7 hop |
 | 8 | buffers | h2dial `-mode=shared`, `/bytes/65536`, listener buffer 4 MiB | per-connection buffer pressure (separate axis from windows) |
@@ -88,6 +88,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 02-fortio | trigger (queueing client) | fortio `-c 2 -qps 5000`, defaults | **H-A** with queueing client |
 | 03-fortio | mcs-cap (queueing client) | fortio `-c 2 -qps 5000`, cap 128 | **H-B refutation**: cap doesn't help queueing clients |
 | 04-fortio | mrpc (queueing client) | fortio `-c 2 -qps 5000`, mrpc 10000 | **H-C confirmation against queueing client** |
+| 05-fortio | windows (queueing client) | fortio `-c 2 -qps 5000`, windows: 1 MiB | **H-D** with queueing client |
 | 12 | grpc-variant | ghz `--connections=1`, grpcbin | gRPC inherits HTTP/2 concentration |
 
 A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates **H-E**.

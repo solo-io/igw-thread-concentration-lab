@@ -2,8 +2,11 @@
 #
 # Raise initial_stream_window_size and initial_connection_window_size from
 # the 64 KiB defaults to 1 MiB. Other settings stay at scenario 2 defaults.
-# Per build-phase refinement A2 (PLAN.md), the load gen for this scenario
-# uses an 8-16 KiB response payload to actually exercise the window.
+# The load gen for this scenario uses 16 KiB response payloads (/bytes/16384):
+# at 5,000 RPS over the few connections this lab drives, that is enough to
+# saturate the 64 KiB connection window without saturating httpbin or the
+# host network as the actual bottleneck. If you don't see flow-control
+# pauses at 16 KiB, raise the payload to /bytes/65536 to push harder.
 #
 # Expected behavior:
 #   - flow_control_paused_reading_total counter (per Envoy upstream cluster

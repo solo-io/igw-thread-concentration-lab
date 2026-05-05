@@ -3,7 +3,8 @@
 #
 # Plaintext (HTTP) listener on port 80 is intentional: TLS handshake cost
 # adds variance to p99 measurement and is unrelated to the HTTP/2 worker-
-# thread mechanism under test (per Phase 2 refinement A4 in PLAN.md).
+# thread mechanism under test. Scenario 10 demonstrates the rotation
+# pattern in plaintext; real mTLS adds handshake CPU on top of that.
 apiVersion: networking.istio.io/v1
 kind: Gateway
 metadata:

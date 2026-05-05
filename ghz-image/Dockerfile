@@ -1,6 +1,8 @@
 # ghz image for scenario 12. ghz is a real gRPC load tester (Go-based,
 # uses grpc-go). With --connections=1 it maintains a single
-# grpc.ClientConn -- the canonical Coinbase-like setup.
+# grpc.ClientConn, which is the canonical "queue on cap" client pattern
+# (a faithful stand-in for production gRPC services that share one
+# ClientConn per upstream peer).
 #
 # We use alpine + curl to fetch the official ghz Linux binary at build
 # time. The image is tagged ghz:local and imported into k3d (no registry).
