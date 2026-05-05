@@ -701,6 +701,33 @@ if should_run "12-grpc-variant" && kctl get deploy grpcbin -n "${NAMESPACE_APP}"
         "${out_dir}/ghz-measure.txt" 2>/dev/null > "${out_dir}/ghz-summary.txt" || true
 fi
 
+# Scenario 13: connection_balance_config (within-pod worker balance).
+# Skips automatically when concurrency=1 (the lab's default), since there
+# is nothing to balance within a single-thread pod. To exercise: set
+# IGW_CPU=2+ in config.env, redeploy, then re-run.
+if [[ -f "${ENVOYFILTERS}/scenario13-conn-balance.yaml" ]] && should_run "13-conn-balance"; then
+    igw_pod_for_check="$(all_igw_pods | head -1)"
+    concurrency_check="$(kctl exec -n "${NAMESPACE_ISTIO}" "${igw_pod_for_check}" \
+        -- pilot-agent request GET server_info 2>/dev/null \
+        | grep -oE '"concurrency": *[0-9]+' | head -1 | grep -oE '[0-9]+')"
+    if [[ -z "${concurrency_check}" || "${concurrency_check}" -lt 2 ]]; then
+        echo ""
+        echo "================================================================"
+        echo "  Scenario: 13-conn-balance (SKIPPED)"
+        echo "================================================================"
+        echo "  Envoy concurrency on the IGW is ${concurrency_check:-unknown}."
+        echo "  Within-pod worker balance only matters at concurrency >= 2."
+        echo "  To run this scenario:"
+        echo "    1) set IGW_CPU=2 (or higher) in config.env"
+        echo "    2) ./cleanup.sh && ./deploy.sh"
+        echo "    3) ./run-tests.sh --only 13-conn-balance"
+    else
+        run_h2dial_scenario "13-conn-balance" \
+            "${ENVOYFILTERS}/scenario13-conn-balance.yaml" \
+            "${IGW_URL}/bytes/16384" 500 shared
+    fi
+fi
+
 # --- Hypothesis evaluation -------------------------------------------------
 if [[ "${SKIP_EVAL}" -eq 1 || -n "${ONLY}" ]]; then
     echo ""

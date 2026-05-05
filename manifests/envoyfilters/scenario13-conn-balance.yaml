@@ -1,0 +1,71 @@
+# Scenario 13: listener connection_balance_config (within-pod worker balance)
+#
+# Hypothesis (H-E): the lab's existing scenarios focus on inter-pod
+# concentration (connections hashed to a small subset of gateway pods)
+# and intra-connection multiplexing (many streams pinned to one worker
+# thread). A third axis exists: WITHIN a multi-thread pod, the kernel
+# delivers accepted connections to whatever worker calls accept() first.
+# Under bursty arrivals or long-lived connections, this can leave one
+# worker thread busy while peers idle, reproducing thread-level
+# concentration even when connections are evenly spread across pods.
+#
+# Envoy's listener-level `connection_balance_config: { exact_balance: {} }`
+# (per the Envoy listener.proto reference in PLAN.md) replaces the
+# kernel-driven accept() race with an in-Envoy counter that directs each
+# new connection to the worker with the fewest active connections.
+#
+# Reference:
+#   https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto
+#   #envoy-v3-api-msg-config-listener-v3-listener-connectionbalanceconfig
+#
+# Trade-offs documented by Envoy:
+#   - ExactBalance uses a process-wide mutex on accept(), which adds a
+#     small CPU cost per new connection. At normal new-connection rates
+#     this is unmeasurable; under connection-heavy regimes (lots of
+#     short-lived connections) it can become a bottleneck.
+#   - For long-lived HTTP/2 connections (the regime this lab studies),
+#     new connections are infrequent, so the mutex overhead is negligible.
+#
+# PREREQUISITE: this scenario only exercises the mechanism when Envoy is
+# running with concurrency >= 2 (i.e., more than one worker thread per
+# pod). The lab's default is concurrency=1, in which case there is
+# nothing to balance within a pod and run-tests.sh skips this scenario.
+# To exercise it, set IGW_CPU=2 (or higher) in config.env, redeploy,
+# then run `./run-tests.sh --only 13-conn-balance`.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  # Listener-level patch: turn on exact connection balancing.
+  - applyTo: LISTENER
+    match:
+      context: GATEWAY
+      listener:
+        portNumber: 8080
+    patch:
+      operation: MERGE
+      value:
+        connection_balance_config:
+          exact_balance: {}
+  # Keep max_concurrent_streams at the trigger default so the scenario
+  # exercises the same connection cardinality as scenario 2.
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536
