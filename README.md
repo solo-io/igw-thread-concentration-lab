@@ -4,7 +4,7 @@
 
 A self-contained k3d lab that reproduces, measures, and lets you tune **Istio Ingress Gateway thread concentration under low client connection cardinality**: the production failure mode where aggregate gateway CPU looks fine but a small number of worker threads saturate, driving tail latency.
 
-The lab is built around four hypotheses about the mechanism and the levers that move it. Running it, reading the dashboards, and reading the per-scenario output should leave you with a working mental model of:
+The lab is built around four hypotheses about the mechanism and the levers that move it, plus a fifth orthogonal hypothesis (H-E) about within-pod worker balance via Envoy's `connection_balance_config`. Running it, reading the dashboards, and reading the per-scenario output should leave you with a working mental model of:
 
 - Why a few long-lived HTTP/2 connections can hot-spot an Istio gateway even when the gateway has plenty of capacity in aggregate.
 - How the four canonical tuning levers (`max_concurrent_streams`, `max_requests_per_connection`, `max_connection_duration`, HTTP/2 flow-control windows) actually behave under load, and how they interact.
@@ -29,14 +29,18 @@ That is the whole story, and everything in this lab is a consequence:
 3. If you have, say, 6 gateway pods and 8 long-lived connections, you can have 4 hot pods and 2 cold ones, with the hot pods serving thousands of streams per worker while the cold ones idle.
 4. Aggregate CPU looks fine. Per-thread CPU on the hot pods is pegged. Tail latency rises. The fix is not "more capacity" but "more connection diversity, or more aggressive rotation, or both."
 
-The four hypotheses encoded in this lab:
+The four core hypotheses encoded in this lab:
 
 - **H-A — the mechanism is real**: low connection cardinality + HTTP/2 multiplexing produces uneven load distribution across gateway pods, measurable as a high coefficient of variation (CV) of `downstream_cx_active`. Scenarios 1 and 2 exercise it.
 - **H-B — capping streams forces dial-out, but only on smart clients**: lowering `max_concurrent_streams` makes the server send `REFUSED_STREAM`. A standards-compliant HTTP/2 client (Go's `net/http2`) dials a new connection. A queueing client (`fortio` with a fixed pool, or gRPC's single `ClientConn` per peer) just waits. Scenarios 3 and 3-fortio prove this both ways.
 - **H-C — counting requests forces rotation regardless of client behavior**: `max_requests_per_connection` triggers `GOAWAY` after N requests on a connection, forcing the client to reconnect. Both queueing and dialing clients respect `GOAWAY`. Scenarios 4 and 4-fortio prove it; this is usually the most robust lever in production.
 - **H-D — flow-control windows can be a hidden bottleneck**: the default 64 KiB HTTP/2 stream and connection windows are too small for high-byte-throughput workloads concentrated on few connections. Scenario 5 exercises 1 MiB; scenario 8 exercises 4 MiB at the listener buffer level.
 
-Plus three secondary explorations: scenario 9 (head-of-line blocking on slow streams), scenario 10 (rotation-induced spikes), scenarios 6/7 (mechanism transfer through the waypoint hop), scenario 11 (filter-chain overhead at scale), scenario 12 (gRPC variant via `ghz`).
+Plus an orthogonal extension covering a third axis of thread-level concentration:
+
+- **H-E — within-pod worker balance via `connection_balance_config`**: at `concurrency >= 2`, kernel-driven `accept()` races inside a multi-thread pod can produce uneven per-worker connection distribution even when per-pod distribution is even. Envoy's listener `connection_balance_config: exact_balance` replaces the kernel race with an Envoy-managed counter. **Orthogonal to H-A through H-D**: it does NOT redistribute connections across pods. Scenario 13 exercises it (gated on `concurrency >= 2`; auto-skips at the lab's default `concurrency=1`).
+
+Plus secondary explorations: scenario 9 (head-of-line blocking on slow streams), scenario 10 (rotation-induced spikes), scenarios 6/7 (mechanism transfer through the waypoint hop), scenario 11 (filter-chain overhead at scale), scenario 12 (gRPC variant via `ghz`).
 
 ## Why fortio queues and h2dial dials
 
@@ -72,7 +76,7 @@ Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 arch
 
 - **k3d** 5.x (tested with 5.8.3)
 - **Docker** running
-- **kubectl**, **helm** 3.x, **bash**, **awk**, **curl**
+- **kubectl**, **helm** 3.x or 4.x, **bash**, **awk**, **curl**
 - **Python 3** with **matplotlib** for the comparison plots: `pip3 install --user matplotlib`
 - Internet access (for `istioctl 1.27.8`, the Gateway API CRDs, container images)
 - No Solo Enterprise license required (uses the public OSS Istio chart with the Solo registry hub)
@@ -138,12 +142,12 @@ After `run-tests.sh` finishes, four things are worth looking at:
 
 1. **The hypothesis-evaluation block printed to stdout**. Plain text summary of which hypothesis passed, refused, or was inconclusive on this run, with the CV and GOAWAY numbers backing the call. This is the at-a-glance answer to "what just happened."
 2. **`results/<latest>/plots/`**. Six PNGs comparing scenarios side-by-side. `cv_across_scenarios.png` is the most important — it puts every scenario on one chart so you can see at a glance which levers move which clients.
-3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, time-series CSV, CPU-sampler trace, the in-flight active-connection histogram, the Envoy admin `clusters` and `listeners` snapshots.
+3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV — relevant for H-E2 / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
 4. **The Grafana dashboard live during the run**. Watching the "CV across pods" panel rise as scenario 2 starts and fall as scenario 4's GOAWAYs fire is the moment the mechanism stops being abstract.
 
 ## Metrics: how to think about them
 
-The lab captures and graphs ~18 metrics. They sort into three buckets, and knowing which is which tells you which to instrument in your own environment.
+The lab captures and graphs ~20 metrics across the IGW listener, the upstream cluster, the per-worker accept counters, and the ztunnel L4 path. They sort into three buckets, and knowing which is which tells you which to instrument in your own environment.
 
 **Aggregate metrics hide concentration. Distribution metrics reveal it.**
 
@@ -291,6 +295,7 @@ Reading these is no substitute for running it yourself, but for reference, headl
 | H-B h2dial (dial on cap) | **CONFIRMED** | s2 CV=1.000 (3 conns), s3 CV=0.825 (5 conns). Cap drives the shared transport to grow its pool. |
 | H-C count rotation | **STRONG PASS — works for ALL clients** | s4-h2dial: thousands of GOAWAYs, even distribution. s4-fortio: ~20 GOAWAYs sufficient to spread fortio across all 6 pods. **The most reliable server-side lever.** |
 | H-D HTTP/2 windows | **partial — saturation real, 1 MiB insufficient** | s2: ~730 flow-control pauses/sec at default 64 KiB. s5: ~577/sec at 1 MiB (21% drop, not zero). 4 MiB+ recommended for high-byte workloads. |
+| H-E within-pod worker balance (s13, only at `concurrency >= 2`) | **modest, real signal** | Empirically at concurrency=2, ~50 conns/pod: control mean per-pod worker CV ≈ 0.110; with `exact_balance` ≈ 0.083 (≈25% reduction). Max per-pod worker CV is similar in both regimes (~0.17–0.18); the kernel's `SO_REUSEPORT` race is good enough often enough that `exact_balance` doesn't always rescue the single worst pod. Auto-skipped at the lab's default `concurrency=1`. |
 | Filter chain overhead (s11) | **negligible at this scale** | s11 p99 within run-to-run variance of s2. A response-flag-filtered access log + JWT validation is not the bottleneck. |
 | Waypoint mechanism transfer | **CONFIRMED, amplified** | Waypoint trigger CV ≈ 1.45 (vs IGW-alone 1.00). Concentration compounds through the waypoint hop, not dampens. |
 | gRPC variant (s12) | **TCP-layer concentration confirmed** | ghz `--connections=1` → CV ≈ 2.2 (single ClientConn → single pod), as predicted analytically. |
@@ -351,6 +356,7 @@ The lab is intentionally scoped tight. Things that would be valuable but aren't 
 - [Envoy threading model](https://blog.envoyproxy.io/envoy-threading-model-a8d44b922310)
 - [Envoy HCM stats](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/stats)
 - [Envoy HTTP/2 protocol options](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/core/v3/protocol.proto#config-core-v3-http2protocoloptions)
+- [Envoy listener `connection_balance_config`](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto#envoy-v3-api-msg-config-listener-v3-listener-connectionbalanceconfig) (H-E)
 - [Envoy outlier detection](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/outlier)
 - [Istio ambient overview](https://istio.io/latest/docs/ambient/overview/)
 - [Istio HBONE protocol](https://istio.io/latest/docs/ambient/architecture/hbone/)

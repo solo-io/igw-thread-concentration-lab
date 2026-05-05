@@ -302,7 +302,7 @@ capture_metrics() {
         echo "${pod} ${pod_worker_cv}" >> "${out}/worker_cv_per_pod.txt"
     done
     # Surface both mean and max per-pod worker CV. The mean is the
-    # discriminating metric for H-E2 (connection_balance_config produces
+    # discriminating metric for H-E (connection_balance_config produces
     # a tighter mean distribution); the max is informative but the
     # kernel's accept race is good enough often enough that exact_balance
     # doesn't always eliminate the single worst pod's imbalance.
@@ -340,7 +340,7 @@ stop_cpu_sampler() {
     sleep 1  # give the loop one tick to exit
 }
 
-# Start metric time-series sampler for H-E (CV-as-leading-indicator).
+# Start metric time-series sampler for the CV-as-leading-indicator measurement principle.
 # Used only on scenario 02-trigger.
 start_metric_sampler() {
     local out="$1"
@@ -433,7 +433,8 @@ run_h2dial_scenario() {
         if [[ "${run}" == "measure" ]]; then
             measure_from_ms=$(($(date +%s) * 1000))
             cpu_sentinel="$(start_cpu_sampler "${out}")"
-            # Time-series metric sampler for H-E. Only enable on the
+            # Time-series metric sampler for the CV-as-leading-indicator
+            # measurement principle. Only enable on the
             # trigger scenario (02-trigger) where we expect to see CV
             # rise before p99 jumps.
             if [[ "${name}" == "02-trigger" ]]; then

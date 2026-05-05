@@ -196,8 +196,8 @@ def plot_he_timeseries(results: Path) -> None:
     ax1.set_ylabel("CV (stddev/mean)", color="#1f77b4")
     ax2.set_ylabel("upstream p99 latency (ms)", color="#d62728")
     ax1.set_title(
-        "H-E (CV-as-leading-indicator) for scenario 02-trigger\n"
-        "Brief claim: CV rises BEFORE p99 jumps. Inspect crossover timing."
+        "CV-as-leading-indicator (scenario 02-trigger)\n"
+        "Claim: CV rises BEFORE p99 jumps. Inspect crossover timing."
     )
     fig.legend(loc="upper left", bbox_to_anchor=(0.1, 0.92))
     plt.tight_layout()

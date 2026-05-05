@@ -1,6 +1,6 @@
 # Scenario 13: listener connection_balance_config (within-pod worker balance)
 #
-# Hypothesis (H-E2): the lab's existing scenarios focus on inter-pod
+# Hypothesis (H-E): the lab's existing scenarios focus on inter-pod
 # concentration (connections hashed to a small subset of gateway pods)
 # and intra-connection multiplexing (many streams pinned to one worker
 # thread). A third axis exists: WITHIN a multi-thread pod, the kernel
@@ -17,7 +17,7 @@
 # Measurement: run-tests.sh's capture_metrics() computes per-worker CV
 # from `listener.0.0.0.0_8080.worker_N.downstream_cx_total` and writes
 # it to worker_cv_per_pod.txt. The scenario summary surfaces the
-# worst-case worker CV across pods, which is the H-E2 confirmation
+# worst-case worker CV across pods, which is the H-E confirmation
 # signal: this scenario should produce a lower worst-case worker CV
 # than a control run (e.g., scenario 1 with the same load profile but
 # no balance config) at the same concurrency.

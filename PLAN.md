@@ -60,7 +60,7 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Confirmation signal:** `rate(flow_control_paused_reading_total)` non-zero at default windows; drops when windows are raised. The drop scales with the window size.
 
-### H-E2: within-pod worker balance via Envoy `connection_balance_config`
+### H-E: within-pod worker balance via Envoy `connection_balance_config`
 
 **Claim:** With `concurrency >= 2` (more than one Envoy worker thread per gateway pod), the kernel-driven `accept()` race can produce uneven distribution of new connections across workers within a single pod, even when connections are evenly distributed across pods. Setting [`connection_balance_config: { exact_balance: {} }`](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto#envoy-v3-api-msg-config-listener-v3-listener-connectionbalanceconfig) on the listener replaces the kernel race with an Envoy-managed counter and produces tighter per-worker distribution.
 
@@ -76,11 +76,13 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Important:** this hypothesis is orthogonal to H-A through H-D. `connection_balance_config` does NOT redistribute connections across pods. It only affects within-pod worker assignment. If your hotspot is at the pod level (kube-proxy or LB hashing), this lever does nothing for you; you need H-B / H-C / H-D's tools.
 
-### H-E: coefficient of variation as a hotspot leading indicator
+### Measurement principle: coefficient of variation as a hotspot leading indicator
+
+This is a methodology corollary of H-A rather than a separate tuning hypothesis, but it's testable and load-bearing for the dashboard's headline query, so it lives here as a named principle.
 
 **Claim:** A Prometheus query computing the CV of `envoy_http_downstream_cx_active` across gateway pods rises ahead of p99 listener latency. The variance metric moves first; latency follows.
 
-**Reasoning:** Hotspotting is by definition a distribution problem. Aggregate metrics (total RPS, mean CPU) hide it. Variance does not. An uneven distribution of work across pods or threads is a precondition of saturation; saturation is a consequence. If H-E holds, the CV query is useful for alerting before tail latency rises.
+**Reasoning:** Hotspotting is by definition a distribution problem. Aggregate metrics (total RPS, mean CPU) hide it. Variance does not. An uneven distribution of work across pods or threads is a precondition of saturation; saturation is a consequence. If this principle holds, the CV query is useful for alerting before tail latency rises.
 
 **Confirmation signal:** time-series sampler captures CV every 5 seconds during scenario 2; p99 captured at the same cadence; the CV trace crosses its threshold before the p99 trace does.
 
@@ -106,9 +108,9 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 04-fortio | mrpc (queueing client) | fortio `-c 2 -qps 5000`, mrpc 10000 | **H-C confirmation against queueing client** |
 | 05-fortio | windows (queueing client) | fortio `-c 2 -qps 5000`, windows: 1 MiB | **H-D** with queueing client |
 | 12 | grpc-variant | ghz `--connections=1`, grpcbin | gRPC inherits HTTP/2 concentration |
-| 13 | conn-balance | h2dial `-mode=distinct -c 300`, listener `connection_balance_config: exact_balance` | **H-E2** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
+| 13 | conn-balance | h2dial `-mode=distinct -c 300`, listener `connection_balance_config: exact_balance` | **H-E** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
 
-A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates **H-E**.
+A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates the measurement-principle claim about CV as a leading indicator.
 
 ### Design choices and why
 
@@ -170,11 +172,11 @@ These are not failure modes of the lab; they are findings worth knowing if you s
 - **H-B refutation (load gen queues, doesn't dial).** The fortio variants are designed to surface this. If h2dial also fails to dial, suspect the shared-transport setup in `h2dial/main.go`.
 - **H-C refutation (count limit never fires).** If `cx_max_requests_reached_total` stays at zero, your scenario is too short or your value is too high relative to per-connection RPS. Drop the value or extend the runtime.
 - **H-D refutation (windows already big enough).** Possible at low byte-throughput. Switch the load gen to `/bytes/65536` to push more bytes per response. If `flow_control_paused_reading_total` is still zero, the scenario does not exercise this hypothesis at the lab's RTT.
-- **H-E refutation (variance does NOT lead latency).** Has not happened in any run we have done; would suggest the metric pipeline is sampling too slowly or the scenario ramp is too fast. Slow the ramp; sample faster.
+- **Measurement-principle refutation (variance does NOT lead latency).** Has not happened in any run we have done; would suggest the metric pipeline is sampling too slowly or the scenario ramp is too fast. Slow the ramp; sample faster.
 
 ## When k3d is enough, and when it isn't
 
-The lab runs entirely on a local k3d cluster. That's a deliberate choice: the four hypotheses (H-A through H-D) and the within-pod balance hypothesis (H-E2) are properties of the Envoy data plane, not properties of any specific cloud or magnitude. They reproduce faithfully at low scale. But the lab can't validate everything a production rollout would care about, and being explicit about the gap matters when the lab is used as a basis for production decisions.
+The lab runs entirely on a local k3d cluster. That's a deliberate choice: the four hypotheses (H-A through H-D) and the within-pod balance hypothesis (H-E) are properties of the Envoy data plane, not properties of any specific cloud or magnitude. They reproduce faithfully at low scale. But the lab can't validate everything a production rollout would care about, and being explicit about the gap matters when the lab is used as a basis for production decisions.
 
 ### What k3d demonstrates faithfully
 

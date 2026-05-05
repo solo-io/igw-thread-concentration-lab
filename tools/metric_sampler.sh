@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# metric_sampler.sh -- background metric time-series sampler for H-E
-# (CV-as-leading-indicator).
+# metric_sampler.sh -- background metric time-series sampler for the
+# CV-as-leading-indicator measurement principle.
 #
 # Every INTERVAL seconds during the measure window, captures:
 #   - timestamp
