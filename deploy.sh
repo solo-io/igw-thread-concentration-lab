@@ -130,7 +130,7 @@ else
     # loudly if the pin doesn't take.
     "${ISTIOCTL}" install --context "${CONTEXT}" \
         --set profile=ambient \
-        --set values.global.proxy.concurrency=1 \
+        --set meshConfig.defaultConfig.concurrency=1 \
         --set values.cni.cniConfDir=/var/lib/rancher/k3s/agent/etc/cni/net.d \
         --set values.cni.cniBinDir=/bin \
         --set components.ingressGateways[0].name=istio-ingressgateway \
