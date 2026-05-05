@@ -1,0 +1,84 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run when a new push to the same branch lands.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ----------------------------------------------------------------
+      # Bash: parse-only check on every shell script in the repo. Catches
+      # syntax errors that would only otherwise fail at deploy time.
+      # ----------------------------------------------------------------
+      - name: bash -n on shell scripts
+        run: |
+          for f in deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh; do
+            echo "  bash -n ${f}"
+            bash -n "${f}"
+          done
+
+      # ----------------------------------------------------------------
+      # shellcheck: catches a wider class of bash bugs (unquoted vars,
+      # unintended globbing, broken pipelines under set -e). Treat
+      # warnings as failures; if a finding is intentional, suppress it
+      # inline with `# shellcheck disable=SCNNNN` and a brief comment.
+      # ----------------------------------------------------------------
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          severity: warning
+          scandir: ./
+          additional_files: deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh
+
+      # ----------------------------------------------------------------
+      # Dashboard: ensure the JSON is parseable. Anything beyond well-
+      # formedness needs a live Grafana to verify, but JSON validity
+      # alone catches the most common failure mode (a stray comma after
+      # a hand edit).
+      # ----------------------------------------------------------------
+      - name: Validate dashboard JSON
+        run: |
+          python3 -c "import json; json.load(open('dashboard/igw-thread-concentration.json'))"
+          echo "  dashboard/igw-thread-concentration.json: valid JSON"
+
+      # ----------------------------------------------------------------
+      # Python: compile-check the plot script. Doesn't run it; just
+      # confirms it parses under the runner's Python.
+      # ----------------------------------------------------------------
+      - name: py_compile plot_results.py
+        run: |
+          python3 -m py_compile tools/plot_results.py
+          echo "  tools/plot_results.py: compiles"
+
+      # ----------------------------------------------------------------
+      # YAML manifests: schema-validate against published Kubernetes
+      # OpenAPI specs. kubeconform is more lenient than kubectl
+      # --dry-run because it doesn't need a live cluster, and ships with
+      # CRD support so it doesn't choke on EnvoyFilter / Gateway / etc.
+      # We point at the upstream Istio + Gateway-API schema bundles for
+      # the CRDs and skip kinds we know aren't covered.
+      # ----------------------------------------------------------------
+      - name: kubeconform manifests
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | tar xz kubeconform
+          ./kubeconform -strict -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            manifests/

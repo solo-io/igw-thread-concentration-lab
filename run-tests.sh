@@ -93,7 +93,10 @@ mkdir -p "${RESULTS_DIR}"
 NAMESPACE_APP="igw-test"
 NAMESPACE_LOAD="loadgen"
 NAMESPACE_ISTIO="istio-system"
-NAMESPACE_MONITORING="monitoring"
+# (No NAMESPACE_MONITORING here: run-tests.sh doesn't talk to the
+# Prometheus stack directly; it only exec's into IGW/waypoint/ztunnel
+# pods. The Grafana URL is hard-coded to localhost:3000 since the
+# port-forward is set up by deploy.sh.)
 
 IGW_URL="http://istio-ingressgateway.${NAMESPACE_ISTIO}:80"
 
@@ -243,7 +246,7 @@ capture_metrics() {
         mkdir -p "${out}/waypoint_stats"
         local wp_total=0 wp_count=0 wp_var=0 wp_mean=0
         for wp in $(all_waypoint_pods); do
-            kctl exec -n "${NAMESPACE_APP}" "${wp}" -- pilot-agent request GET stats 2>/dev/null \
+            kctl exec -n "${NAMESPACE_APP}" "${wp}" -- pilot-agent request GET stats \
                 > "${out}/waypoint_stats/${wp}.txt" 2>/dev/null || true
             local v
             v="$(awk -F': ' '/downstream_cx_http2_total: /{s+=$2} END{print s+0}' "${out}/waypoint_stats/${wp}.txt" 2>/dev/null)"

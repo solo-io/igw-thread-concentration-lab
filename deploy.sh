@@ -271,7 +271,7 @@ kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/06-waypoint.yaml" >/dev/nu
 # Waypoint is created via Gateway resource of class istio-waypoint; the
 # istiod controller deploys the waypoint pod automatically. Wait for it.
 echo "  Waiting up to 60s for waypoint pod..."
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     if kubectl --context "${CONTEXT}" get pod -n "${NAMESPACE_APP}" -l gateway.istio.io/managed=istio.io-mesh-controller 2>/dev/null | grep -q Running; then
         echo "  Waypoint pod is Running."
         break
