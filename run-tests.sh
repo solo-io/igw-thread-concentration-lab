@@ -278,6 +278,45 @@ capture_metrics() {
     local cv_active
     cv_active="$(cv_across_pods "${LISTENER_PREFIX}.downstream_cx_active")"
     echo "  CV(downstream_cx_active across pods, post-run gauge) = ${cv_active}" | tee -a "${out}/cv.txt"
+
+    # Per-worker CV within each pod. This is the within-pod balance
+    # metric that scenario 13 (connection_balance_config) operates on.
+    # At concurrency=1 every pod has one worker; CV is undefined and we
+    # write 0. At concurrency >= 2 we compute CV across worker_N values
+    # of downstream_cx_total per pod, then surface the worst-case (max)
+    # across pods so a single hot pod can't hide behind even peers.
+    : > "${out}/worker_cv_per_pod.txt"
+    for pod in $(all_igw_pods); do
+        local pod_worker_cv
+        pod_worker_cv="$(admin "${pod}" stats 2>/dev/null \
+            | awk '/^listener\.0\.0\.0\.0_8080\.worker_[0-9]+\.downstream_cx_total: /{print $NF}' \
+            | awk '
+                { n++; sum += $1; sumsq += $1 * $1 }
+                END {
+                    if (n < 2 || sum == 0) { print "0"; exit }
+                    mean = sum / n
+                    var = (sumsq / n) - (mean * mean)
+                    if (var < 0) var = 0
+                    printf "%.3f\n", sqrt(var) / mean
+                }')"
+        echo "${pod} ${pod_worker_cv}" >> "${out}/worker_cv_per_pod.txt"
+    done
+    # Surface both mean and max per-pod worker CV. The mean is the
+    # discriminating metric for H-E2 (connection_balance_config produces
+    # a tighter mean distribution); the max is informative but the
+    # kernel's accept race is good enough often enough that exact_balance
+    # doesn't always eliminate the single worst pod's imbalance.
+    local worker_cv_mean worker_cv_max
+    read worker_cv_mean worker_cv_max < <(awk '
+        { n++; sum += $2; if ($2 > max) max = $2 }
+        END {
+            if (n == 0) { print "0 0"; exit }
+            printf "%.3f %.3f\n", sum / n, max
+        }' "${out}/worker_cv_per_pod.txt")
+    echo "  CV(worker_N.downstream_cx_total within a pod, mean across pods) = ${worker_cv_mean:-0}" \
+        | tee -a "${out}/cv.txt"
+    echo "  CV(worker_N.downstream_cx_total within a pod, max across pods)  = ${worker_cv_max:-0}" \
+        | tee -a "${out}/cv.txt"
 }
 
 # Per-thread CPU snapshot dropped: cpu_sampler.sh runs throughout the
@@ -722,9 +761,14 @@ if [[ -f "${ENVOYFILTERS}/scenario13-conn-balance.yaml" ]] && should_run "13-con
         echo "    2) ./cleanup.sh && ./deploy.sh"
         echo "    3) ./run-tests.sh --only 13-conn-balance"
     else
+        # Load profile is intentionally different from the trigger scenarios:
+        # distinct mode with c=300 gives ~50 connections per pod, so each
+        # pod's workers actually have multiple connections to balance. With
+        # shared mode (c=500 across the lab's 3-5 transport-pool conns),
+        # most pods get 0 or 1 connection and there's nothing to balance.
         run_h2dial_scenario "13-conn-balance" \
             "${ENVOYFILTERS}/scenario13-conn-balance.yaml" \
-            "${IGW_URL}/bytes/16384" 500 shared
+            "${IGW_URL}/bytes/16384" 300 distinct
     fi
 fi
 

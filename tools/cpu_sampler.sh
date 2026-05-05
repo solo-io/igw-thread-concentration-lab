@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# cpu_sampler.sh -- background CPU sampler invoked from run-tests.sh.
+# cpu_sampler.sh -- background sampler invoked from run-tests.sh.
 #
-# Samples per-pod CPU (kubectl top) and per-thread CPU (top -H inside the
-# Envoy process) for each IGW pod every INTERVAL seconds, until the file
-# at SENTINEL_PATH is removed. Output goes to OUT_DIR/<sample-N>.txt.
+# Samples two things every INTERVAL seconds, until the file at
+# SENTINEL_PATH is removed:
 #
-# This addresses the customer's data ask (per-pod CPU spread + per-thread
-# CPU view during peak load) which a post-run snapshot misses.
+#   1. Per-pod CPU/memory via `kubectl top pod` — the proxy-side view.
+#   2. Per-worker connection counts via Envoy admin
+#      (`listener.0.0.0.0_8080.worker_N.downstream_cx_*`) — the within-pod
+#      thread-balance view.
+#
+# Why this isn't `top -H` inside the pod: the istio-proxy container
+# ships without `sh`, `top`, and `pgrep`, so the obvious approach
+# silently produces empty samples. Envoy's own admin exposes per-worker
+# accept counts directly, which is what `connection_balance_config:
+# exact_balance` operates on, so it's actually a more direct measurement
+# than CPU.
+#
+# Output: OUT_DIR/sample-NNN-<ts>.txt
 #
 # Args:
 #   $1: CONTEXT (k3d cluster context)
@@ -36,8 +46,11 @@ while [[ -f "${SENTINEL}" ]]; do
         kubectl --context "${CONTEXT}" top pod -n "${NAMESPACE_ISTIO}" -l app=istio-ingressgateway --no-headers 2>/dev/null
         echo
         for pod in $(kubectl --context "${CONTEXT}" get pod -n "${NAMESPACE_ISTIO}" -l app=istio-ingressgateway -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
-            echo "--- top -H @ ${pod} ---"
-            kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${pod}" -- sh -c 'top -H -b -n 1 -p $(pgrep envoy) 2>/dev/null | head -20' 2>/dev/null
+            echo "--- per-worker stats @ ${pod} ---"
+            kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${pod}" \
+                -- pilot-agent request GET stats 2>/dev/null \
+                | grep -E '^listener\.0\.0\.0\.0_8080\.worker_[0-9]+\.downstream_(cx_total|cx_active|rq_total): ' \
+                | sort
             echo
         done
     } > "${sample}" 2>&1

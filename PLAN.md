@@ -66,7 +66,11 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Reasoning:** Envoy's default listener uses `SO_REUSEPORT`-style accept across worker threads, where each worker's accept loop competes for new connections. Whichever worker is least busy at accept time gets the connection; this is biased by workload type (a worker holding a hot HTTP/2 connection is less responsive on accept than an idle peer, so hot connections cluster). `ExactBalance` serializes accepts through a process-wide mutex and assigns each new connection to the worker with the fewest active connections.
 
-**Confirmation signal:** at `concurrency >= 2`, CV across worker threads (computed from `top -H` per-thread CPU samples in `cpu_sampler.sh` output) drops measurably between control and `ExactBalance` runs, while CV across pods is unchanged.
+**Confirmation signal:** at `concurrency >= 2`, the **mean** of per-pod worker CV computed across `listener.0.0.0.0_8080.worker_N.downstream_cx_total` (the per-worker accept-counter that `connection_balance_config` directly affects) drops measurably between control and `ExactBalance` runs, while CV across pods is unchanged. Empirically at concurrency=2 with ~50 connections per pod, `ExactBalance` reduces mean worker CV by roughly 25% (e.g., 0.110 → 0.083 in a representative run). The **max** per-pod worker CV is similar in both regimes, because the kernel's `SO_REUSEPORT` accept race is good enough often enough that `ExactBalance` doesn't always eliminate the single worst pod's imbalance.
+
+`cpu_sampler.sh` snapshots per-worker counters every 5s during the measure window; `run-tests.sh`'s capture step writes per-pod worker CV to `worker_cv_per_pod.txt` and surfaces both mean and max on the scenario summary line.
+
+**To compare scenario 13 against a control:** apply `scenario1-baseline.yaml` (no listener overrides) with the same `-mode=distinct -c=300 -d=60s` h2dial load, capture per-pod worker CV, then apply scenario 13 and capture again. The control run shows the kernel's natural accept-race distribution; scenario 13 shows it under `ExactBalance`.
 
 **Refutation:** the kernel race already produces even within-pod distribution at this RPS, so `ExactBalance` adds mutex overhead without measurable benefit. This is a real production trade-off: at very high new-connection rates `ExactBalance` becomes a bottleneck. For long-lived HTTP/2 (the regime this lab studies) new connections are rare and the mutex cost is unmeasurable.
 
@@ -102,7 +106,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 04-fortio | mrpc (queueing client) | fortio `-c 2 -qps 5000`, mrpc 10000 | **H-C confirmation against queueing client** |
 | 05-fortio | windows (queueing client) | fortio `-c 2 -qps 5000`, windows: 1 MiB | **H-D** with queueing client |
 | 12 | grpc-variant | ghz `--connections=1`, grpcbin | gRPC inherits HTTP/2 concentration |
-| 13 | conn-balance | h2dial `-mode=shared`, listener `connection_balance_config: exact_balance` | **H-E2** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
+| 13 | conn-balance | h2dial `-mode=distinct -c 300`, listener `connection_balance_config: exact_balance` | **H-E2** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
 
 A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates **H-E**.
 

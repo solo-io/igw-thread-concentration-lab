@@ -1,6 +1,6 @@
 # Scenario 13: listener connection_balance_config (within-pod worker balance)
 #
-# Hypothesis (H-E): the lab's existing scenarios focus on inter-pod
+# Hypothesis (H-E2): the lab's existing scenarios focus on inter-pod
 # concentration (connections hashed to a small subset of gateway pods)
 # and intra-connection multiplexing (many streams pinned to one worker
 # thread). A third axis exists: WITHIN a multi-thread pod, the kernel
@@ -13,6 +13,22 @@
 # (per the Envoy listener.proto reference in PLAN.md) replaces the
 # kernel-driven accept() race with an in-Envoy counter that directs each
 # new connection to the worker with the fewest active connections.
+#
+# Measurement: run-tests.sh's capture_metrics() computes per-worker CV
+# from `listener.0.0.0.0_8080.worker_N.downstream_cx_total` and writes
+# it to worker_cv_per_pod.txt. The scenario summary surfaces the
+# worst-case worker CV across pods, which is the H-E2 confirmation
+# signal: this scenario should produce a lower worst-case worker CV
+# than a control run (e.g., scenario 1 with the same load profile but
+# no balance config) at the same concurrency.
+#
+# Load profile note: this scenario uses h2dial -mode=distinct with a
+# high connection count (300+), unlike the trigger scenarios which use
+# shared transport with c=500. The reason: the lab's shared-transport
+# regime has only 3-5 connections total across 6 pods, so most pods
+# get 0 or 1 connection and there is nothing to balance. distinct mode
+# with c=300 gives ~50 connections per pod, which is what makes
+# within-pod balance a meaningful question.
 #
 # Reference:
 #   https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto
