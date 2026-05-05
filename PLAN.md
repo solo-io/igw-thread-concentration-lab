@@ -74,7 +74,16 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Refutation:** the kernel race already produces even within-pod distribution at this RPS, so `ExactBalance` adds mutex overhead without measurable benefit. This is a real production trade-off: at very high new-connection rates `ExactBalance` becomes a bottleneck. For long-lived HTTP/2 (the regime this lab studies) new connections are rare and the mutex cost is unmeasurable.
 
-**Important:** this hypothesis is orthogonal to H-A through H-D. `connection_balance_config` does NOT redistribute connections across pods. It only affects within-pod worker assignment. If your hotspot is at the pod level (kube-proxy or LB hashing), this lever does nothing for you; you need H-B / H-C / H-D's tools.
+**Important:** this hypothesis is orthogonal to H-A through H-D. `connection_balance_config` does NOT redistribute connections across pods. It only affects within-pod worker assignment.
+
+The risk is that a reader sees both H-C (`max_requests_per_connection`) and H-E (`connection_balance_config: exact_balance`) as "force redistribution" levers and treats them as interchangeable. They aren't, and picking the wrong one for the symptom does nothing.
+
+| Symptom | Fix | Why the other does nothing |
+|---|---|---|
+| Few clients pinned to few gateway pods (low connection cardinality from kube-proxy or L4 LB hashing) | **H-C**: forces clients to redial; new TCP connections re-hash and may land on different pods | H-E has zero effect across pods. The one hot pod's workers are all hot regardless of accept-queue routing. |
+| Per-pod load is even, but one worker thread inside a pod is saturated | **H-E**: picks the worker with fewest active connections at accept time, replacing the kernel `SO_REUSEPORT` race | H-C doesn't help intra-pod. New connections still hit the same kernel accept race in the same pod. |
+
+The two are complementary in production. If you stack both, you address inter-pod (H-C) and intra-pod (H-E) imbalance simultaneously without conflict. If you can only ship one, ship H-C: lower deployment risk (no in-Envoy mutex; doesn't add overhead at high new-connection rates), works against every client behavior the lab tests, and addresses the more common production failure mode.
 
 ### Measurement principle: coefficient of variation as a hotspot leading indicator
 

@@ -40,6 +40,17 @@ Plus an orthogonal extension covering a third axis of thread-level concentration
 
 - **H-E — within-pod worker balance via `connection_balance_config`**: at `concurrency >= 2`, kernel-driven `accept()` races inside a multi-thread pod can produce uneven per-worker connection distribution even when per-pod distribution is even. Envoy's listener `connection_balance_config: exact_balance` replaces the kernel race with an Envoy-managed counter. **Orthogonal to H-A through H-D**: it does NOT redistribute connections across pods. Scenario 13 exercises it (gated on `concurrency >= 2`; auto-skips at the lab's default `concurrency=1`).
 
+### Picking between H-C and H-E
+
+`max_requests_per_connection` (H-C) and `connection_balance_config: exact_balance` (H-E) both "force redistribution," which is enough to make them sound interchangeable. They aren't. They operate at different scopes — and picking the wrong one for your symptom does nothing.
+
+| If your symptom is… | The fix is… | Why the other one doesn't help |
+|---|---|---|
+| Few clients pinned to few gateway pods (e.g. kube-proxy or L4 LB collapsed connection cardinality) | **H-C** — `max_requests_per_connection`. Forces clients to redial; new TCP connections get re-hashed and may land elsewhere. | `connection_balance_config` does nothing across pods. Your one hot pod's workers are all hot. Balancing within it doesn't move load off the pod. |
+| Per-pod load is even, but one worker thread inside a pod is saturated | **H-E** — `connection_balance_config: exact_balance`. Picks the worker with fewest active connections at accept time. | `max_requests_per_connection` doesn't help intra-pod. New connections still hit the same kernel accept race inside the same pod. |
+
+In production, both can stack — they don't conflict. If you only get to deploy one and you're not sure which symptom you have, **start with H-C**: it has lower deployment risk (no in-Envoy mutex), works against any client behavior, and addresses the more common production failure mode.
+
 Plus secondary explorations: scenario 9 (head-of-line blocking on slow streams), scenario 10 (rotation-induced spikes), scenarios 6/7 (mechanism transfer through the waypoint hop), scenario 11 (filter-chain overhead at scale), scenario 12 (gRPC variant via `ghz`).
 
 ## Why fortio queues and h2dial dials
