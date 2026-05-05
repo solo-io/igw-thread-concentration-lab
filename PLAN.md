@@ -155,6 +155,43 @@ These are not failure modes of the lab; they are findings worth knowing if you s
 - **H-D refutation (windows already big enough).** Possible at low byte-throughput. Switch the load gen to `/bytes/65536` to push more bytes per response. If `flow_control_paused_reading_total` is still zero, the scenario does not exercise this hypothesis at the lab's RTT.
 - **H-E refutation (variance does NOT lead latency).** Has not happened in any run we have done; would suggest the metric pipeline is sampling too slowly or the scenario ramp is too fast. Slow the ramp; sample faster.
 
+## When k3d is enough, and when it isn't
+
+The lab runs entirely on a local k3d cluster. That's a deliberate choice: the four hypotheses (H-A through H-D) and the within-pod balance hypothesis (H-E2) are properties of the Envoy data plane, not properties of any specific cloud or magnitude. They reproduce faithfully at low scale. But the lab can't validate everything a production rollout would care about, and being explicit about the gap matters when the lab is used as a basis for production decisions.
+
+### What k3d demonstrates faithfully
+
+The mechanism questions all reproduce at low magnitude:
+
+- Connection cardinality producing uneven pod hash producing high CV. The math is the same at 2 connections × 5,000 RPS as at 1M+ RPS over thousands of connections.
+- HTTP/2 stream multiplexing pinning streams to one worker thread. A property of Envoy, not of scale.
+- Cap-induced dial-vs-queue client behavior. A property of the *client implementation* (Go `net/http2` vs queueing pools), not of scale.
+- Count rotation vs duration rotation firing rates and effects. The qualitative outcomes are scale-invariant; the firing rates differ in magnitude but not direction.
+- Mechanism transfer through the waypoint hop. Same Envoy process; same mechanism.
+
+For these, the answer is the same in k3d as it is in a cloud cluster. Running them at scale doesn't increase confidence; it increases cost without increasing signal.
+
+### What k3d cannot demonstrate
+
+Five things require a cloud-scale environment:
+
+1. **Production-magnitude RPS** (1M+ RPS). k3d hits Docker network and kernel-buffer limits well below that. The lab can demonstrate "the mechanism is real and lever X moves it"; it cannot quantify "lever X reduces p99 by N ms in your environment at your RPS."
+
+2. **L4 LB hash dynamics**. Real-world hotspotting often originates at the edge LB (e.g., AWS NLB cross-zone or zonal-affinity behavior). The lab drives low connection cardinality directly via the load gen's `-c` flag, which proves the *consequence* but not the *trigger*. An EKS-behind-NLB reproducer would be needed to study the trigger specifically.
+
+3. **Cross-AZ flow-control RTT**. HTTP/2 default 64 KiB windows saturate as a function of RTT × bandwidth. Intra-cluster RTT in k3d is sub-millisecond; cross-AZ RTT in real cloud topologies is 0.5–2 ms; cross-region is 20+ ms. The lab's H-D shows windows are real and that 1 MiB is insufficient *at this RTT*. The right window size at production RTT is empirically different and needs to be measured at production RTT.
+
+4. **Real client-population variance**. The lab uses h2dial / fortio / ghz with tightly-controlled connection counts. Production has hundreds of client pods with imperfect hash distribution and time-correlated arrivals. Variance characteristics differ.
+
+5. **Real mTLS handshake CPU**. Scenario 10 demonstrates the rotation pattern in plaintext. mTLS adds 0.5–5 ms of handshake CPU per rotation depending on key type (RSA vs ECDSA). The impact on tail latency under rotation is workload-dependent and only measurable in a real cert-issuing topology.
+
+### Practical guidance
+
+- **Mechanism validation and lever selection**: this lab is sufficient. Use it to choose which knobs to apply, in what order, and to build intuition for how each one behaves.
+- **Pre-production sign-off on a specific fix at production scale**: a staging cloud environment is necessary. The infrastructure for that is not part of this lab.
+
+The split is intentional. The lab's purpose is to be a fast, reproducible, locally-runnable mechanism demonstrator. A cloud variant would be a different artifact with different goals (cluster lifecycle, cost controls, IAM, license management). If a v2 cloud reproducer becomes valuable, it would slot alongside this lab as a separate artifact rather than replacing it.
+
 ## Out of scope
 
 - Production-magnitude RPS (1M+ RPS).
