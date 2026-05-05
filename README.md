@@ -80,17 +80,20 @@ The lab runs on Apple Silicon and Linux. On Apple Silicon a couple of components
 ## Quick start
 
 ```bash
-# 1. Deploy the cluster + base environment + dashboard (~6-8 min)
+# 1. (Optional) Override defaults. Skip this step to use the baked-in values.
+cp config.env.example config.env       # then edit (cluster name, versions, replicas, ...)
+
+# 2. Deploy the cluster + base environment + dashboard (~6-8 min)
 ./deploy.sh
 
-# 2. Run all scenarios + collect metrics + render plots (~25-30 min)
+# 3. Run all scenarios + collect metrics + render plots (~25-30 min)
 ./run-tests.sh
 
 # View live dashboards while the runner is going (port-forward starts in deploy.sh):
 open http://localhost:3000      # admin / admin
 # Dashboard UID: igw-thread-concentration
 
-# 3. Tear down when done
+# 4. Tear down when done
 ./cleanup.sh
 ```
 

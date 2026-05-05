@@ -73,9 +73,16 @@ should_run() {
 }
 
 # --- Configuration ----------------------------------------------------------
-CLUSTER_NAME="igw-tc-lab"
-CONTEXT="k3d-${CLUSTER_NAME}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Optional config.env (gitignored). See config.env.example for the keys.
+if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/config.env"
+fi
+: "${CLUSTER_NAME:=igw-tc-lab}"
+CONTEXT="k3d-${CLUSTER_NAME}"
+
 MANIFESTS="${SCRIPT_DIR}/manifests"
 ENVOYFILTERS="${MANIFESTS}/envoyfilters"
 TOOLS="${SCRIPT_DIR}/tools"

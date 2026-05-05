@@ -7,9 +7,15 @@
 
 set -euo pipefail
 
-CLUSTER_NAME="igw-tc-lab"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source config.env if present so we tear down whatever cluster name
+# deploy.sh actually used. Defaults match deploy.sh.
+if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/config.env"
+fi
+: "${CLUSTER_NAME:=igw-tc-lab}"
 
 # Stop the Grafana port-forward background process if present.
 PORTFORWARD_PIDFILE="${SCRIPT_DIR}/.grafana-portforward.pid"

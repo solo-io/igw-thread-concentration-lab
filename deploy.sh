@@ -30,20 +30,29 @@
 set -euo pipefail
 
 # --- Configuration ----------------------------------------------------------
-CLUSTER_NAME="igw-tc-lab"
-CONTEXT="k3d-${CLUSTER_NAME}"
-ISTIO_VERSION="1.27.8"
-GATEWAY_API_VERSION="v1.2.1"
-KUBE_PROM_STACK_VERSION="84.5.0"
-
-# Load-generator container images. fortio is version-tagged. grpcbin is
-# digest-pinned because the upstream maintainer hasn't pushed a versioned
-# tag since 2022; the digest below is for what was :latest on that date
-# and is what the lab was validated against.
-FORTIO_IMAGE="fortio/fortio:1.75.1"
-GRPCBIN_IMAGE="moul/grpcbin@sha256:bd8f2ffdd02d0849fad2d1c754eff4402c867e7a3e0552b8992f4590f5687d20"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Optional config.env (gitignored). Copy config.env.example to config.env to
+# override any default below without editing this script. All values have
+# sensible defaults; config.env is purely for customization.
+if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/config.env"
+fi
+
+# Defaults (a value already set by config.env wins via :=).
+: "${CLUSTER_NAME:=igw-tc-lab}"
+: "${ISTIO_VERSION:=1.27.8}"
+: "${GATEWAY_API_VERSION:=v1.2.1}"
+: "${KUBE_PROM_STACK_VERSION:=84.5.0}"
+: "${FORTIO_IMAGE:=fortio/fortio:1.75.1}"
+: "${GRPCBIN_IMAGE:=moul/grpcbin@sha256:bd8f2ffdd02d0849fad2d1c754eff4402c867e7a3e0552b8992f4590f5687d20}"
+: "${IGW_REPLICAS:=6}"
+: "${IGW_CPU:=1}"
+: "${IGW_HTTP_PORT:=18080}"
+: "${WAYPOINT_REPLICAS:=3}"
+CONTEXT="k3d-${CLUSTER_NAME}"
+
 ISTIOCTL="${SCRIPT_DIR}/istioctl"
 MANIFESTS="${SCRIPT_DIR}/manifests"
 
@@ -51,10 +60,6 @@ NAMESPACE_APP="igw-test"
 NAMESPACE_LOAD="loadgen"
 NAMESPACE_ISTIO="istio-system"
 NAMESPACE_MONITORING="monitoring"
-
-IGW_REPLICAS=6  # 6 pods give enough kube-proxy hashing surface to make the "few connections among many pods" regime cleanly observable.
-IGW_CPU=1  # 1 worker thread per pod (concurrency pinned via values.global.proxy.concurrency=1 below); 6 pods = 6 worker threads total. CPU=1 keeps the cluster footprint small enough to fit alongside ztunnel/grafana/etc.
-IGW_HTTP_PORT=18080  # high port to avoid local conflicts
 
 echo "=== IGW Thread Concentration Lab: Deploy ==="
 echo "Cluster: ${CLUSTER_NAME}"
@@ -273,10 +278,10 @@ for i in $(seq 1 30); do
     fi
     sleep 2
 done
-# Bump waypoint replicas to 3 so we can measure CV across waypoint
-# pods directly (single-replica = CV undefined). The istiod-managed
-# Deployment is `igw-test-waypoint` in the igw-test namespace.
-WAYPOINT_REPLICAS=3
+# Bump waypoint replicas (default 3, override via WAYPOINT_REPLICAS in
+# config.env) so we can measure CV across waypoint pods directly;
+# single-replica makes CV undefined. The istiod-managed Deployment is
+# `igw-test-waypoint` in the igw-test namespace.
 echo "  Bumping waypoint replicas to ${WAYPOINT_REPLICAS}..."
 kubectl --context "${CONTEXT}" scale deployment/igw-test-waypoint -n "${NAMESPACE_APP}" --replicas="${WAYPOINT_REPLICAS}" >/dev/null 2>&1 || true
 kubectl --context "${CONTEXT}" rollout status deployment/igw-test-waypoint -n "${NAMESPACE_APP}" --timeout=120s >/dev/null 2>&1 || true

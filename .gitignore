@@ -41,3 +41,4 @@ Thumbs.db
 # Local environment overrides
 .env
 .envrc
+config.env
