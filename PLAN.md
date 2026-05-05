@@ -183,8 +183,8 @@ These are not failure modes of the lab; they are findings worth knowing if you s
 
 ### Solo product documentation
 
-- [Solo Gloo Mesh: ambient mode overview](https://docs.solo.io/gloo-mesh/latest/ambient/)
-- [Solo Gloo Mesh: ambient architecture (ztunnel and waypoint components)](https://docs.solo.io/gloo-mesh/latest/ambient/about/architecture/)
+- [Solo Enterprise for Istio: ambient mode overview](https://docs.solo.io/gloo-mesh/latest/ambient/)
+- [Solo Enterprise for Istio: ambient architecture (ztunnel and waypoint components)](https://docs.solo.io/gloo-mesh/latest/ambient/about/architecture/)
 
 ### Related public GitHub issues
 

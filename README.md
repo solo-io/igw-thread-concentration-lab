@@ -348,6 +348,6 @@ The lab is intentionally scoped tight. Things that would be valuable but aren't 
 - [Istio ambient overview](https://istio.io/latest/docs/ambient/overview/)
 - [Istio HBONE protocol](https://istio.io/latest/docs/ambient/architecture/hbone/)
 - [Istio waypoint usage](https://istio.io/latest/docs/ambient/usage/waypoint/)
-- [Solo Gloo Mesh: ambient](https://docs.solo.io/gloo-mesh/latest/ambient/)
+- [Solo Enterprise for Istio: ambient](https://docs.solo.io/gloo-mesh/latest/ambient/)
 - [Istio issue #58114 — HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)
 - [RFC 9113 (HTTP/2)](https://datatracker.ietf.org/doc/html/rfc9113)
