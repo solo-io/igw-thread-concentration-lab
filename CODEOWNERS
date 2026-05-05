@@ -1,0 +1,12 @@
+# Default owners for everything in the repo.
+# These owners will be requested for review on every PR.
+* @southsidedean
+
+# Documentation
+*.md @southsidedean
+
+# Scenario design and EnvoyFilter manifests
+manifests/envoyfilters/ @southsidedean
+
+# Dashboards
+dashboard/ @southsidedean
