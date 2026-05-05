@@ -1,0 +1,36 @@
+# Waypoint resource for scenarios 6 and 7 (Q4 validation).
+#
+# In Istio ambient mode, a waypoint is created by deploying a Gateway of
+# class `istio-waypoint`. The mesh-controller in istiod automatically
+# deploys a waypoint Envoy pod for the namespace and reroutes ambient L7
+# traffic through it. See the Istio waypoint usage guide referenced in
+# PLAN.md.
+#
+# Scenarios 6 and 7 send traffic from the loadgen namespace (NOT in
+# ambient mode) through the istio-ingressgateway and onward into igw-test
+# (in ambient mode, with this waypoint). The L7 hop on the way to httpbin
+# is the waypoint Envoy pod; that is what we observe for Q4.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: igw-test-waypoint
+  namespace: igw-test
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+  - name: mesh
+    port: 15008
+    protocol: HBONE
+  # Q3: bumped via post-deploy patch; istiod's waypoint controller honors
+  # replica count from the Gateway resource via the
+  # gateway.istio.io/min-replicas annotation when it deploys the waypoint
+  # Deployment. We patch the Deployment in deploy.sh to scale to 3 (since
+  # the Gateway-API spec doesn't have a replicas field at L4).
+#
+# The httpbin Service does NOT opt into the waypoint by default. Ambient
+# traffic to httpbin uses ztunnel only (L4 path) for scenarios 1-5.
+# run-tests.sh adds the `istio.io/use-waypoint=igw-test-waypoint` label
+# to the httpbin Service at the start of scenario 6 and removes it
+# again at scenario teardown.

@@ -1,0 +1,33 @@
+# Scenario 2: Trigger (H-A) -- high concurrent streams, few connections
+#
+# Pin max_concurrent_streams: 65536 (Istio's effective default) at the HCM,
+# explicit so scenario 3 can compare against it. Run-tests.sh drives 5000
+# RPS at -c 2 (two TCP connections) from fortio. Expected:
+#   - p99 listener latency rises sharply
+#   - aggregate gateway CPU stays moderate
+#   - per-thread CPU view shows 1-2 hot threads, others idle
+#   - coefficient of variation on downstream_cx_active across pods is high
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536

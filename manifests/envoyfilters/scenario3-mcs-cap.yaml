@@ -1,0 +1,40 @@
+# Scenario 3: Fix 1 (H-B) -- max_concurrent_streams cap forces redistribution
+#
+# Cap streams per connection at 128. Compliant HTTP/2 clients (per RFC 9113)
+# open additional connections once the cap is reached. With the load gen
+# still requesting -c 2 from fortio, fortio should dial more connections
+# in response to REFUSED_STREAM signals, distributing load across more
+# worker threads.
+#
+# Build-phase refinement A6 (PLAN.md): we sanity-check during the validation
+# pass that fortio actually does this rather than queueing.
+#
+# Expected delta from scenario 2:
+#   - downstream_cx_active rises (fortio opens more connections)
+#   - coefficient of variation on cx_active drops
+#   - p99 latency drops
+#   - aggregate gateway CPU is unchanged
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 128

@@ -1,0 +1,45 @@
+# Scenario 5: Fix 3 (H-D) -- HTTP/2 flow-control window saturation
+#
+# Raise initial_stream_window_size and initial_connection_window_size from
+# the 64 KiB defaults to 1 MiB. Other settings stay at scenario 2 defaults.
+# Per build-phase refinement A2 (PLAN.md), the load gen for this scenario
+# uses an 8-16 KiB response payload to actually exercise the window.
+#
+# Expected behavior:
+#   - flow_control_paused_reading_total counter (per Envoy upstream cluster
+#     stats reference) drops to zero or near-zero relative to scenario 2
+#   - p99 latency improves on streams that were previously stalled waiting
+#     for WINDOW_UPDATE
+#   - downstream_cx_active distribution is unchanged from scenario 2
+#     (this fix targets per-stream throughput, not connection distribution)
+#
+# Refutation criterion: if flow_control_paused never appeared in scenario
+# 2, then there was no window saturation to fix. Per PLAN.md, that would
+# be the most consequential refutation since it would weaken the brief's
+# Q2 lead claim.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536
+            initial_stream_window_size: 1048576       # 1 MiB
+            initial_connection_window_size: 1048576   # 1 MiB

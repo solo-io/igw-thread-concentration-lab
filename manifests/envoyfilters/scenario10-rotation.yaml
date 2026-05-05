@@ -1,0 +1,50 @@
+# Scenario 10: Q2 cause #5 -- connection rotation (mTLS handshake cost proxy)
+#
+# The brief's claim: "mTLS handshake cost concentrated on rotation -- when
+# 150s rotation hits with fewer connections in flight, each rotation now
+# affects more streams. May appear as periodic spikes timed to the
+# rotation interval."
+#
+# We cannot easily reproduce real mTLS handshake cost without setting up
+# self-signed certs, an HTTPS Istio Gateway, and TLS-aware client config.
+# Instead, we demonstrate the rotation-spike PATTERN with a plain h2c
+# listener and an aggressively short max_connection_duration: 10s.
+#
+# What this shows:
+#   - downstream_cx_max_duration_reached climbs steadily (rotations firing)
+#   - p99 latency exhibits periodic spikes timed to ~10s intervals
+#   - spike magnitude is driven by TCP/h2-renegotiation cost + brief
+#     period when no connection is available
+#
+# In real mTLS production: each rotation also costs a TLS handshake
+# (RSA: 2-5 ms CPU per peer, ECDSA: 0.5-2 ms). At normal connection
+# cardinality, that handshake cost is amortized across thousands of
+# streams, but at LOW connection cardinality (e.g., when an L4 LB with
+# zonal affinity collapses traffic onto one connection per client), it
+# concentrates and shows as spikes.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536
+          common_http_protocol_options:
+            max_connection_duration: 10s

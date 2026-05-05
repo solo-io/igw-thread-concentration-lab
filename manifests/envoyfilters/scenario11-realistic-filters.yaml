@@ -1,0 +1,59 @@
+# Scenario 11: realistic filter chain (NR-only access log + telemetry tags)
+#
+# Adds a realistic IGW filter chain to quantify per-request overhead vs the
+# bare scenarios 1-7. Production deployments commonly run with a layered
+# filter stack: response-flag-filtered access log, telemetry with trimmed
+# tags, and JWKS-backed JWT validation.
+#
+# This scenario adds:
+#   - access log (JSON, response_flags filter for NR only)
+#   - max_concurrent_streams: 65536 (same as scenario 2 baseline)
+#
+# JWT/RequestAuthentication is intentionally NOT added here: it requires a
+# functional JWKS endpoint plus pre-signed tokens in h2dial requests. That
+# is exercised separately via manifests/11-jwt-auth.yaml when the runner
+# layers JWT on top of this scenario.
+#
+# Compared to scenario 2 (bare HCM), differences in p99 attribute to the
+# access-log filter overhead.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536
+          access_log:
+          - name: envoy.access_loggers.file
+            filter:
+              response_flag_filter:
+                flags: ["NR"]
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
+              path: /dev/stdout
+              log_format:
+                json_format:
+                  start_time: "%START_TIME%"
+                  method: "%REQ(:METHOD)%"
+                  path: "%REQ(:PATH)%"
+                  protocol: "%PROTOCOL%"
+                  response_code: "%RESPONSE_CODE%"
+                  response_flags: "%RESPONSE_FLAGS%"
+                  duration: "%DURATION%"

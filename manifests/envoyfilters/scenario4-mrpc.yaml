@@ -1,0 +1,41 @@
+# Scenario 4: Fix 2 (H-C) -- max_requests_per_connection rotation
+#
+# max_concurrent_streams stays at the scenario 2 default (65536) so the
+# only changed variable is max_requests_per_connection at 10000. Scenario
+# 4 isolates whether count-based rotation alone (without stream-cap-driven
+# redistribution from scenario 3) shifts load over time as hot connections
+# rotate.
+#
+# Expected behavior:
+#   - downstream_cx_max_requests_reached counter rises on hot connections
+#   - over a longer test window, downstream_cx_active distribution smooths
+#   - p99 improves but not as dramatically as scenario 3
+#   - downstream_cx_max_duration_reached stays unchanged from scenario 2
+#     (the 150s duration limit fires far less often than the 10k count
+#     limit on hot connections doing thousands of RPS)
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536
+          common_http_protocol_options:
+            max_requests_per_connection: 10000

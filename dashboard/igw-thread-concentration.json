@@ -1,0 +1,315 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "CV(downstream_cx_active) across IGW pods (HOTSPOT KILLER QUERY)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "description": "stddev/avg of active connections across pods. Rises BEFORE p99 latency rises -- a leading indicator of thread concentration.",
+      "targets": [
+        {
+          "expr": "stddev(envoy_http_downstream_cx_active{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}) / avg(envoy_http_downstream_cx_active{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"})",
+          "legendFormat": "CV across pods",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "title": "Per-pod cx_http2_total (cumulative HTTP/2 connections accepted)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "description": "Per-pod cumulative HTTP/2 connection count. Uneven lines = concentration. Equal lines = healthy distribution.",
+      "targets": [
+        {
+          "expr": "envoy_http_downstream_cx_http2_total{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Per-pod active connections (downstream_cx_active)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "envoy_http_downstream_cx_active{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "p50 / p95 / p99 request latency at IGW (per-request)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 4,
+      "description": "Per-request histogram from envoy_http_downstream_rq_time_bucket. Updates per request (vs cx_length_ms which is per connection-close). Compare timing to the CV panel to validate the leading-indicator claim.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(envoy_http_downstream_rq_time_bucket{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}[1m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(envoy_http_downstream_rq_time_bucket{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}[1m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(envoy_http_downstream_rq_time_bucket{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}[1m])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "title": "GOAWAY rate (max_duration + max_requests reached)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 5,
+      "description": "Rate of count-based and time-based GOAWAY firings. H-C confirms when max_requests_reached > 0.",
+      "targets": [
+        {
+          "expr": "rate(envoy_http_downstream_cx_max_duration_reached{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\"}[1m])",
+          "legendFormat": "max_duration_reached",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(envoy_http_downstream_cx_max_requests_reached{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\"}[1m])",
+          "legendFormat": "max_requests_reached",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Flow control paused (Q2 cause #1, H-D)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 6,
+      "description": "Rate of upstream flow_control_paused_reading_total. Non-zero = HTTP/2 window saturation. Zero at intra-cluster RTT (refutes brief's Q2 #1 framing at this scale).",
+      "targets": [
+        {
+          "expr": "rate(envoy_cluster_upstream_flow_control_paused_reading_total{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}[1m])",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "Upstream cx_overflow + rq_pending_overflow (Q2 cause: pool saturation)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "rate(envoy_cluster_upstream_cx_overflow{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}[1m])",
+          "legendFormat": "cx_overflow",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(envoy_cluster_upstream_rq_pending_overflow{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}[1m])",
+          "legendFormat": "rq_pending_overflow",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "title": "Upstream bytes buffered (Q2 cause #2: per_connection_buffer_limit_bytes)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "id": 8,
+      "description": "Backpressure indicator. Rising values = listener buffer filling = per_connection_buffer_limit_bytes too low.",
+      "targets": [
+        {
+          "expr": "envoy_cluster_upstream_cx_rx_bytes_buffered{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}",
+          "legendFormat": "{{pod}} rx",
+          "refId": "A"
+        },
+        {
+          "expr": "envoy_cluster_upstream_cx_tx_bytes_buffered{cluster_name=\"outbound|8080||httpbin.igw-test.svc.cluster.local\"}",
+          "legendFormat": "{{pod}} tx",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "title": "ztunnel: TCP connection rate per node (Q4 ambient HBONE)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 9,
+      "description": "Per-ztunnel TCP connections opened rate. Each ztunnel handles ambient L4 traffic for its node; uneven values point to per-node concentration upstream of any waypoint.",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(istio_tcp_connections_opened_total{pod=~\"ztunnel-.*\"}[1m]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "title": "ztunnel: bytes sent + received per node (HBONE throughput)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 10,
+      "description": "Per-ztunnel HBONE byte throughput (TX + RX). Uneven across nodes = per-node hotspotting in the ambient L4 path.",
+      "targets": [
+        {
+          "expr": "sum by (pod) (rate(istio_tcp_sent_bytes_total{pod=~\"ztunnel-.*\"}[1m]))",
+          "legendFormat": "{{pod}} sent",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (pod) (rate(istio_tcp_received_bytes_total{pod=~\"ztunnel-.*\"}[1m]))",
+          "legendFormat": "{{pod}} recv",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        }
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "igw-thread-concentration",
+    "igw",
+    "thread-concentration"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "IGW Thread Concentration",
+  "uid": "igw-thread-concentration",
+  "version": 1,
+  "weekStart": ""
+}

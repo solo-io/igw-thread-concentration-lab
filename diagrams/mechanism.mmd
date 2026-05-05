@@ -1,0 +1,39 @@
+%% H-A: Why few client connections concentrate load onto few worker threads
+%% Render: mmdc -i mechanism.mmd -o mechanism.png -t default -b white --width 1400
+flowchart LR
+  subgraph A["CASE A: 2 client connections (concentration, CV=0.7)"]
+    direction LR
+    cA[Client<br/>2 TCP conns]
+    hashA{kube-proxy<br/>or NLB hash}
+    cA -->|conn1| hashA
+    cA -->|conn2| hashA
+    hashA -->|conn1| pA1[IGW pod 1<br/>T1 HOT - T2 idle]
+    hashA -->|conn2| pA2[IGW pod 2<br/>T1 HOT - T2 idle]
+    hashA -.no traffic.-> pA3[IGW pod 3<br/>T1 idle - T2 idle]
+
+    style pA1 fill:#ffc9c9,stroke:#dc2626
+    style pA2 fill:#ffc9c9,stroke:#dc2626
+    style pA3 fill:#f5f5f5,stroke:#999,color:#666
+    style cA fill:#a5d8ff
+    style hashA fill:#fff3bf
+  end
+
+  subgraph B["CASE B: 100 client connections (distribution, CV=0.1)"]
+    direction LR
+    cB[Client<br/>100 TCP conns]
+    hashB{kube-proxy<br/>hash}
+    cB -->|conns 1..100| hashB
+    hashB -->|~33 conns| pB1[IGW pod 1<br/>T1 + T2 sharing work]
+    hashB -->|~33 conns| pB2[IGW pod 2<br/>T1 + T2 sharing work]
+    hashB -->|~34 conns| pB3[IGW pod 3<br/>T1 + T2 sharing work]
+
+    style pB1 fill:#b2f2bb,stroke:#15803d
+    style pB2 fill:#b2f2bb,stroke:#15803d
+    style pB3 fill:#b2f2bb,stroke:#15803d
+    style cB fill:#b2f2bb
+    style hashB fill:#fff3bf
+  end
+
+  A ~~~ B
+
+  classDef title font-weight:bold

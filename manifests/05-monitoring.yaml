@@ -1,0 +1,70 @@
+# PodMonitor for the istio-ingressgateway and waypoint pods. Scrapes
+# Envoy stats from port 15090 (the istio-proxy stats endpoint) on every
+# matching pod, so per-pod metrics (downstream_cx_active, GOAWAY counters,
+# flow-control pauses) are available in Prometheus for the dashboard and
+# for the coefficient-of-variation hotspot query.
+#
+# Why PodMonitor not ServiceMonitor: stats are emitted per-pod, and we
+# want per-pod cardinality preserved. The kube-prometheus-stack chart
+# default selectors discover this manifest.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: istio-ingressgateway
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  namespaceSelector:
+    matchNames:
+    - istio-system
+  selector:
+    matchLabels:
+      app: istio-ingressgateway
+  podMetricsEndpoints:
+  - port: http-envoy-prom
+    path: /stats/prometheus
+    interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: istio-waypoints
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  namespaceSelector:
+    matchNames:
+    - igw-test
+  selector:
+    matchLabels:
+      gateway.istio.io/managed: istio.io-mesh-controller
+  podMetricsEndpoints:
+  - port: http-envoy-prom
+    path: /stats/prometheus
+    interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ztunnel
+  namespace: monitoring
+  labels:
+    release: kube-prom-stack
+spec:
+  namespaceSelector:
+    matchNames:
+    - istio-system
+  selector:
+    matchLabels:
+      app: ztunnel
+  podMetricsEndpoints:
+  # ztunnel exposes Prometheus metrics on the named port "ztunnel-stats"
+  # (port 15020). Earlier versions of this manifest used "http-monitoring"
+  # which doesn't match ztunnel's actual port name; result was Prometheus
+  # silently not scraping ztunnel and the HBONE dashboard panels were
+  # empty.
+  - port: ztunnel-stats
+    path: /metrics
+    interval: 15s

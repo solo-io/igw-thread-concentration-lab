@@ -1,0 +1,70 @@
+%% H-B: Why fortio queues at the cap, h2dial dials
+%% Render: mmdc -i queue-vs-dial.mmd -o queue-vs-dial.png -b white --width 1500
+flowchart TB
+  subgraph FortioBox["fortio (-c 2): per-goroutine isolated client - QUEUES"]
+    direction TB
+    fG1[Goroutine 1] --> fC1[http.Client #1]
+    fC1 --> fT1[Transport #1]
+    fT1 --> fConn1((TCP 1))
+
+    fG2[Goroutine 2] --> fC2[http.Client #2]
+    fC2 --> fT2[Transport #2]
+    fT2 --> fConn2((TCP 2))
+
+    fServer["Server: max_concurrent_streams = 128<br/>REFUSED_STREAM after 128"]
+    fConn1 -.cap reached.-> fServer
+    fConn2 -.cap reached.-> fServer
+
+    fResult["Result:<br/>Streams queue at app layer<br/>No new connections opened<br/>Cap reduction has NO effect on distribution<br/>CV = 0.707 in BOTH s2 and s3"]:::fortioResult
+
+    fServer --> fResult
+
+    style fG1 fill:#ffd8a8,stroke:#f59e0b
+    style fG2 fill:#ffd8a8,stroke:#f59e0b
+    style fC1 fill:#ffd8a8,stroke:#f59e0b
+    style fC2 fill:#ffd8a8,stroke:#f59e0b
+    style fT1 fill:#ffd8a8,stroke:#f59e0b
+    style fT2 fill:#ffd8a8,stroke:#f59e0b
+    style fConn1 fill:#a5d8ff
+    style fConn2 fill:#a5d8ff
+    style fServer fill:#fff3bf
+  end
+
+  subgraph H2dialBox["h2dial (-c 500): all goroutines share ONE Transport - DIALS"]
+    direction TB
+    hG1[Goroutine 1] --> hClient
+    hG2[Goroutine 2] --> hClient
+    hG3[... goroutine 500] --> hClient
+    hClient[ONE shared http.Client]
+    hClient --> hTransport
+    hTransport[ONE shared http2.Transport<br/>clientConnPool dials on cap]
+
+    hTransport --> hConn1((TCP 1))
+    hTransport --> hConn2((TCP 2))
+    hTransport --> hConn3((TCP 3))
+    hTransport --> hConnN((TCP 4+))
+
+    hServer["Server: max_concurrent_streams = 128"]
+    hConn1 -.-> hServer
+    hConn2 -.-> hServer
+    hConn3 -.-> hServer
+    hConnN -.-> hServer
+
+    hResult["Result:<br/>Pool sees existing conns saturated<br/>Dials new connections (Go 1.21+)<br/>Load redistributes across pods<br/>cap=65536 -> 3 conns. cap=128 -> 5 conns. CV drops 60%"]:::h2dialResult
+
+    hServer --> hResult
+
+    style hG1 fill:#b2f2bb,stroke:#22c55e
+    style hG2 fill:#b2f2bb,stroke:#22c55e
+    style hG3 fill:#b2f2bb,stroke:#22c55e
+    style hClient fill:#b2f2bb,stroke:#22c55e
+    style hTransport fill:#b2f2bb,stroke:#22c55e
+    style hConn1 fill:#a5d8ff
+    style hConn2 fill:#a5d8ff
+    style hConn3 fill:#a5d8ff
+    style hConnN fill:#a5d8ff
+    style hServer fill:#fff3bf
+  end
+
+  classDef fortioResult fill:#ffe0e0,stroke:#dc2626,color:#7f1d1d
+  classDef h2dialResult fill:#d3f9d8,stroke:#15803d,color:#15803d

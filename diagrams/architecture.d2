@@ -1,0 +1,64 @@
+# IGW Thread Concentration Lab: k3d cluster topology
+#
+# Render: d2 architecture.d2 architecture.png
+
+direction: right
+
+cluster: "k3d cluster: igw-tc-lab" {
+  style: { fill: "#dbe4ff"; stroke: "#4a9eed"; border-radius: 12 }
+
+  loadgen: "loadgen ns\n(NOT in ambient)" {
+    style: { fill: "#fff3bf"; stroke: "#f59e0b"; border-radius: 8 }
+
+    fortio: "fortio\n(fixed pool)" { style.fill: "#ffd8a8" }
+    h2dial: "h2dial\n(shared transport)" { style.fill: "#ffd8a8" }
+  }
+
+  istio: "istio-system" {
+    style: { fill: "#e5dbff"; stroke: "#8b5cf6"; border-radius: 8 }
+
+    istiod: istiod { style.fill: "#d0bfff" }
+    ztunnel: "ztunnel\n(DaemonSet)" { style.fill: "#d0bfff" }
+    cni: "istio-cni\n(DaemonSet)" { style.fill: "#d0bfff" }
+
+    igw: "Istio Ingress Gateway\n(3 replicas, CPU=2)" {
+      style: { fill: "#a5d8ff"; stroke: "#4a9eed" }
+      pod1: "IGW pod 1"
+      pod2: "IGW pod 2"
+      pod3: "IGW pod 3"
+    }
+
+    waypoint: "waypoint\n(scenarios 6, 7)" { style.fill: "#eebefa" }
+  }
+
+  app: "igw-test ns\n(ambient mode)" {
+    style: { fill: "#d3f9d8"; stroke: "#22c55e"; border-radius: 8 }
+
+    httpbin1: "httpbin pod 1" { style.fill: "#b2f2bb" }
+    httpbin2: "httpbin pod 2" { style.fill: "#b2f2bb" }
+  }
+
+  monitoring: "monitoring ns" {
+    style: { fill: "#c3fae8"; stroke: "#06b6d4"; border-radius: 8 }
+
+    prometheus: Prometheus { style.fill: "#a5d8ff" }
+    grafana: "Grafana\n(dashboard igw-thread-concentration)" { style.fill: "#a5d8ff" }
+  }
+}
+
+# Traffic flow
+cluster.loadgen.h2dial -> cluster.istio.igw: "HTTP/2 (h2c) port 80"
+cluster.loadgen.fortio -> cluster.istio.igw: "HTTP/2"
+cluster.istio.igw -> cluster.app.httpbin1: "via ztunnel L4"
+cluster.istio.igw -> cluster.app.httpbin2: "via ztunnel L4"
+cluster.istio.igw -> cluster.istio.waypoint: "L7 (s6, s7 only)"
+cluster.istio.waypoint -> cluster.app.httpbin1: "scenarios 6, 7"
+
+# Monitoring
+cluster.monitoring.prometheus -> cluster.istio.igw: "scrape :15090" {
+  style.stroke-dash: 3
+  style.stroke: "#06b6d4"
+}
+cluster.monitoring.grafana -> cluster.monitoring.prometheus: "queries" {
+  style.stroke-dash: 3
+}

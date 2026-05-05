@@ -1,0 +1,18 @@
+# Scenario 1: Baseline (low load, defaults)
+#
+# No HCM overrides. Confirms the metrics pipeline at rest and produces a
+# "good" coefficient-of-variation reference value before scenario 2 drives
+# concentration.
+#
+# Empty EnvoyFilter still creates the resource so run-tests.sh can manage
+# all scenario manifests with the same kubectl apply / delete pattern.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches: []

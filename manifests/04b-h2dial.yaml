@@ -1,0 +1,45 @@
+# h2dial: a custom Go HTTP/2 client that exercises Go's http2.Transport
+# connection-pool dial-on-cap behavior. Used by run-tests.sh scenarios 2b
+# and 3b to demonstrate the "smart client" half of H-B (the dialing-client
+# response to GOAWAY, in contrast to fortio's queue-on-cap behavior).
+#
+# See h2dial/main.go for the source and rationale.
+#
+# Image is built locally and imported into k3d (no registry):
+#   docker build -t h2dial:local h2dial/
+#   k3d image import h2dial:local --cluster <cluster>
+# imagePullPolicy: Never prevents the kubelet from trying to pull from a
+# registry that does not have the local-built tag.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: h2dial
+  namespace: loadgen
+  labels:
+    app: h2dial
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: h2dial
+  template:
+    metadata:
+      labels:
+        app: h2dial
+    spec:
+      containers:
+      - name: h2dial
+        image: h2dial:local
+        imagePullPolicy: Never
+        # -idle: sleep forever; load runs are kubectl exec invocations
+        # of /h2dial with -url, -d, -c flags directly. The distroless
+        # base has no /bin/sh, so the keep-alive must be the binary
+        # itself in idle mode.
+        args: ["-idle"]
+        resources:
+          requests:
+            cpu: 500m
+            memory: 256Mi
+          limits:
+            cpu: 2
+            memory: 1Gi

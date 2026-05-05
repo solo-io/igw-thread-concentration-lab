@@ -1,0 +1,76 @@
+# Q2: grpcbin backend for the gRPC variant scenario.
+#
+# moul/grpcbin exposes the GRPCBin service on port 9000 (HTTP/1) and
+# port 9001 (gRPC over h2c). Reflection is enabled, so ghz can introspect
+# without a .proto file.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grpcbin
+  namespace: igw-test
+  labels:
+    app: grpcbin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: grpcbin
+  template:
+    metadata:
+      labels:
+        app: grpcbin
+    spec:
+      containers:
+      - name: grpcbin
+        image: moul/grpcbin:latest
+        ports:
+        - containerPort: 9000
+          name: http
+        - containerPort: 9001
+          name: grpc
+        readinessProbe:
+          tcpSocket:
+            port: 9001
+          periodSeconds: 2
+        resources:
+          requests: { cpu: 200m, memory: 64Mi }
+          limits: { cpu: 1, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grpcbin
+  namespace: igw-test
+  labels:
+    app: grpcbin
+spec:
+  selector:
+    app: grpcbin
+  ports:
+  - name: grpc
+    port: 9001
+    targetPort: 9001
+    appProtocol: grpc
+---
+# VirtualService routing for gRPC traffic. We use a hostname match so
+# gRPC traffic and httpbin HTTP traffic don't collide on the same path.
+# ghz dials the IGW with `--authority grpcbin.igw-test` so this hostname
+# matches.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: grpcbin
+  namespace: igw-test
+spec:
+  hosts:
+  - "grpcbin.igw-test"
+  gateways:
+  - igw-test-gateway
+  http:
+  - match:
+    - port: 80
+    route:
+    - destination:
+        host: grpcbin.igw-test.svc.cluster.local
+        port:
+          number: 9001

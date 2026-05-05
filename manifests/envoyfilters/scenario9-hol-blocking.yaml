@@ -1,0 +1,41 @@
+# Scenario 9: Q2 cause #4 -- HTTP/2 head-of-line blocking on slow streams
+#
+# Hypothesis: even with stream multiplexing, a single connection's
+# stream-level slowness can affect tail latency on other streams sharing
+# that connection. stream_idle_timeout only catches the IDLE case (no
+# data flowing); a stream that IS slowly progressing does not idle out
+# but still consumes a stream slot and connection bandwidth.
+#
+# This scenario uses h2dial's -slow-url / -slow-workers flags. The 5 slow
+# workers hammer /delay/2 (httpbin returns after 2 seconds) on the same
+# http.Client; the primary 500 workers fire /bytes/16384 and we measure
+# their p99. We expect p99 on the fast workload to be elevated relative
+# to scenario 2's baseline because the connection's flow-control window
+# is partially consumed by buffered slow-stream data.
+#
+# Same EnvoyFilter as scenario 2 (default cap, no overrides) so the only
+# variable is the presence of slow streams.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536

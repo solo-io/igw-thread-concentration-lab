@@ -1,0 +1,53 @@
+# Scenario 8: Q2 cause #2 -- per_connection_buffer_limit_bytes
+#
+# Default Envoy listener per_connection_buffer_limit_bytes is 1 MiB. With
+# many concurrent streams sharing a connection at high byte throughput,
+# the listener-side write buffer fills before the kernel TCP send buffer
+# can drain it; Envoy applies backpressure (paused reads from upstream)
+# and tail latency rises.
+#
+# This scenario raises the listener buffer to 4 MiB (the brief's
+# recommended starting point). Compared to scenario 2 (default 1 MiB),
+# we look for differences in:
+#   - upstream_cx_rx_bytes_buffered (cluster-side, may drop)
+#   - upstream_cx_tx_bytes_buffered (cluster-side)
+#   - listener.0.0.0.0_8080.downstream_cx_length_ms p99
+#
+# Note: the Envoy field that this maps to is configured at the listener
+# level via overload manager / connection buffer limit, NOT via HCM
+# http2_protocol_options. We patch the LISTENER itself.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: igw-tc-scenario
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: LISTENER
+    match:
+      context: GATEWAY
+      listener:
+        portNumber: 8080
+    patch:
+      operation: MERGE
+      value:
+        per_connection_buffer_limit_bytes: 4194304   # 4 MiB
+  # Also keep max_concurrent_streams at the high default so we exercise
+  # high stream concurrency that fills the buffer.
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          http2_protocol_options:
+            max_concurrent_streams: 65536

@@ -1,0 +1,69 @@
+# Backend: mccutchen/go-httpbin
+#
+# Why this image: it provides /bytes/N for deterministic response size
+# (used by scenario 5 to exercise the 64 KiB HTTP/2 flow-control window)
+# and /delay/N for fixed-latency responses (used by scenarios 1-4 to remove
+# backend variance from the p99 measurement).
+#
+# Learning: this image uses CMD, not ENTRYPOINT. We pass `command:`
+# explicitly so the container starts without arg-substitution surprises.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: httpbin
+  namespace: igw-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+  namespace: igw-test
+  labels:
+    app: httpbin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: httpbin
+  template:
+    metadata:
+      labels:
+        app: httpbin
+    spec:
+      serviceAccountName: httpbin
+      containers:
+      - name: httpbin
+        image: mccutchen/go-httpbin:v2.15.0
+        command: ["/bin/go-httpbin"]
+        args: ["-port=8080", "-max-body-size=20971520"]  # 20 MB max body
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /status/200
+            port: 8080
+          periodSeconds: 2
+        resources:
+          requests:
+            cpu: 200m
+            memory: 64Mi
+          limits:
+            cpu: 1
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  namespace: igw-test
+  labels:
+    app: httpbin
+spec:
+  selector:
+    app: httpbin
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    appProtocol: http

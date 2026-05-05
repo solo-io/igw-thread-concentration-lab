@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: igw-test
+  labels:
+    # Ambient mode: ztunnel captures L4 traffic in this namespace.
+    # The waypoint resource (06-waypoint.yaml) adds L7 processing for the
+    # backend service; scenarios 6 and 7 route traffic through it.
+    istio.io/dataplane-mode: ambient
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loadgen
+  # Loadgen namespace is intentionally NOT in ambient mode. Fortio's HTTP/2
+  # connection pooling behavior is what we are testing; we want it to talk
+  # directly to the istio-ingressgateway listener without any ambient
+  # transparent proxy in the path.

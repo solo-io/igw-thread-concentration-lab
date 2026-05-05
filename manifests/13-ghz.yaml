@@ -1,0 +1,37 @@
+# ghz gRPC load tester for scenario 12.
+#
+# ghz is a real gRPC load tester (Go-based, uses grpc-go internally). With
+# --connections 1 it maintains a single grpc.ClientConn, which is the
+# canonical "queue on cap" client pattern: streams queue at the server's
+# stream cap rather than driving the transport pool to dial new connections.
+# That makes ghz a faithful stand-in for production gRPC services that
+# share a single ClientConn per upstream peer. We use ghz's reflection
+# mode so we don't need a .proto file: grpcbin exposes service reflection.
+#
+# Idle command: `tail -f /dev/null`. The image is built locally from
+# ghz-image/Dockerfile and side-loaded into the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ghz
+  namespace: loadgen
+  labels:
+    app: ghz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ghz
+  template:
+    metadata:
+      labels:
+        app: ghz
+    spec:
+      containers:
+      - name: ghz
+        image: ghz:local
+        imagePullPolicy: Never  # built locally and imported via k3d image import
+        command: ["sh", "-c", "tail -f /dev/null"]
+        resources:
+          requests: { cpu: 500m, memory: 256Mi }
+          limits: { cpu: 2, memory: 1Gi }

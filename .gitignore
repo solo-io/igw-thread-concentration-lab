@@ -1,0 +1,43 @@
+# Test run outputs
+results/
+
+# Logs
+*.log
+
+# Background process pid files
+.grafana-portforward.pid
+*.pid
+
+# Downloaded tooling
+istioctl
+istioctl-*
+
+# Internal seed-archive metadata (not for public consumption)
+seed.yaml
+
+# Built binaries (h2dial / ghz local builds)
+h2dial/h2dial
+ghz-image/ghz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local environment overrides
+.env
+.envrc

@@ -1,0 +1,45 @@
+# Fortio load generator
+#
+# Run as a long-lived Deployment; scenarios drive load via `kubectl exec`
+# into this pod. Fortio supports HTTP/1.1, HTTP/2, and gRPC. The HTTP/2
+# mode is what we use, because it is the protocol where the thread-
+# concentration mechanism manifests.
+#
+# CPU is generous (2 cores) so the load generator itself is not the
+# bottleneck during 5000 RPS scenarios.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortio
+  namespace: loadgen
+  labels:
+    app: fortio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fortio
+  template:
+    metadata:
+      labels:
+        app: fortio
+    spec:
+      containers:
+      - name: fortio
+        image: fortio/fortio:latest
+        # The fortio image is distroless (no /bin/sh). Run `fortio server`
+        # for the keep-alive process; this serves the fortio web UI on
+        # port 8080 and stays alive. Actual load tests are driven via
+        # `kubectl exec deploy/fortio -- fortio load ...` from run-tests.sh.
+        command: ["fortio"]
+        args: ["server"]
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            cpu: 500m
+            memory: 256Mi
+          limits:
+            cpu: 2
+            memory: 1Gi
