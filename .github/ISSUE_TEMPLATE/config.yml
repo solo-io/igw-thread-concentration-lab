@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/solo-io/igw-thread-concentration-lab/security/advisories/new
+    about: For security-sensitive issues, please open a private security advisory instead of a public issue. See SECURITY.md.
+  - name: Question or discussion
+    url: https://github.com/solo-io/igw-thread-concentration-lab/discussions
+    about: For open-ended questions about the lab, the mechanism, or how to adapt it to your environment, start a Discussion. Issues are for concrete bugs or scenario proposals.
