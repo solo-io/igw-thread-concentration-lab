@@ -130,6 +130,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate on
 | 04-fortio | mrpc (fortio) | fortio `-c 2 -qps 5000` | `max_requests_per_connection: 10000` | Confirms count rotation works on a queueing client. | Even per-pod distribution after ~20 GOAWAYs fire. The most important comparison in the whole lab. |
 | 05-fortio | windows (fortio) | fortio `-c 2 -qps 5000` | `initial_*_window_size: 1 MiB` | Same window tuning as s5 but driven by fortio. Confirms the window effect is independent of which client is pushing bytes. | Compare flow-control pause rate to s5. |
 | 12 | grpc-variant | ghz `--connections=1` against grpcbin | (none) | gRPC inherits HTTP/2's concentration semantics. Single `ClientConn` → single pod at the TCP layer. | CV at the pod level matches the analytical prediction; gRPC handshake fails on grpcbin TLS expectations but the connection-distribution finding is unaffected. |
+| 13 | conn-balance | h2dial `-mode=shared -c 500` | listener `connection_balance_config: exact_balance` | **Within-pod worker balance** (third axis: kernel-driven accept races inside a multi-thread pod). Orthogonal to H-A through H-D; only relevant when `concurrency >= 2`. | At concurrency=1 (lab default) the scenario auto-skips; at concurrency>=2 compare per-worker-thread CV (from `cpu_sampler.sh`'s `top -H` data) to scenario 2. To run: set `IGW_CPU=2+` in `config.env`, redeploy, then `./run-tests.sh --only 13-conn-balance`. |
 
 ### How to read the output
 

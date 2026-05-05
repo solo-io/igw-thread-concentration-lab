@@ -60,6 +60,18 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Confirmation signal:** `rate(flow_control_paused_reading_total)` non-zero at default windows; drops when windows are raised. The drop scales with the window size.
 
+### H-E2: within-pod worker balance via Envoy `connection_balance_config`
+
+**Claim:** With `concurrency >= 2` (more than one Envoy worker thread per gateway pod), the kernel-driven `accept()` race can produce uneven distribution of new connections across workers within a single pod, even when connections are evenly distributed across pods. Setting [`connection_balance_config: { exact_balance: {} }`](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto#envoy-v3-api-msg-config-listener-v3-listener-connectionbalanceconfig) on the listener replaces the kernel race with an Envoy-managed counter and produces tighter per-worker distribution.
+
+**Reasoning:** Envoy's default listener uses `SO_REUSEPORT`-style accept across worker threads, where each worker's accept loop competes for new connections. Whichever worker is least busy at accept time gets the connection; this is biased by workload type (a worker holding a hot HTTP/2 connection is less responsive on accept than an idle peer, so hot connections cluster). `ExactBalance` serializes accepts through a process-wide mutex and assigns each new connection to the worker with the fewest active connections.
+
+**Confirmation signal:** at `concurrency >= 2`, CV across worker threads (computed from `top -H` per-thread CPU samples in `cpu_sampler.sh` output) drops measurably between control and `ExactBalance` runs, while CV across pods is unchanged.
+
+**Refutation:** the kernel race already produces even within-pod distribution at this RPS, so `ExactBalance` adds mutex overhead without measurable benefit. This is a real production trade-off: at very high new-connection rates `ExactBalance` becomes a bottleneck. For long-lived HTTP/2 (the regime this lab studies) new connections are rare and the mutex cost is unmeasurable.
+
+**Important:** this hypothesis is orthogonal to H-A through H-D. `connection_balance_config` does NOT redistribute connections across pods. It only affects within-pod worker assignment. If your hotspot is at the pod level (kube-proxy or LB hashing), this lever does nothing for you; you need H-B / H-C / H-D's tools.
+
 ### H-E: coefficient of variation as a hotspot leading indicator
 
 **Claim:** A Prometheus query computing the CV of `envoy_http_downstream_cx_active` across gateway pods rises ahead of p99 listener latency. The variance metric moves first; latency follows.
@@ -90,6 +102,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 04-fortio | mrpc (queueing client) | fortio `-c 2 -qps 5000`, mrpc 10000 | **H-C confirmation against queueing client** |
 | 05-fortio | windows (queueing client) | fortio `-c 2 -qps 5000`, windows: 1 MiB | **H-D** with queueing client |
 | 12 | grpc-variant | ghz `--connections=1`, grpcbin | gRPC inherits HTTP/2 concentration |
+| 13 | conn-balance | h2dial `-mode=shared`, listener `connection_balance_config: exact_balance` | **H-E2** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
 
 A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates **H-E**.
 
