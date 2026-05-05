@@ -19,8 +19,12 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     steps:
+      # SHA-pinned per supply-chain hygiene: the @v4 tag is mutable and could
+      # be moved to malicious code by an attacker (cf. tj-actions/changed-files
+      # incident, March 2025). Update by replacing the SHA + bumping the
+      # comment; check `gh api /repos/actions/checkout/git/refs/tags/v4`.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       # ----------------------------------------------------------------
       # Bash: parse-only check on every shell script in the repo. Catches
@@ -39,8 +43,11 @@ jobs:
       # warnings as failures; if a finding is intentional, suppress it
       # inline with `# shellcheck disable=SCNNNN` and a brief comment.
       # ----------------------------------------------------------------
+      # SHA-pinned (see Checkout note above). The @master ref is mutable;
+      # this SHA is the 2.0.0 release. Update by checking
+      # `gh api /repos/ludeeus/action-shellcheck/releases/latest`.
       - name: shellcheck
-        uses: ludeeus/action-shellcheck@master
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # 2.0.0
         with:
           severity: warning
           scandir: ./
