@@ -5,7 +5,7 @@
 # and /delay/N for fixed-latency responses (used by scenarios 1-4 to remove
 # backend variance from the p99 measurement).
 #
-# Learning: this image uses CMD, not ENTRYPOINT. We pass `command:`
+# Note: this image uses CMD, not ENTRYPOINT. We pass `command:`
 # explicitly so the container starts without arg-substitution surprises.
 apiVersion: v1
 kind: ServiceAccount

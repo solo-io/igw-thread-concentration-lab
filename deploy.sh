@@ -35,6 +35,14 @@ CONTEXT="k3d-${CLUSTER_NAME}"
 ISTIO_VERSION="1.27.8"
 GATEWAY_API_VERSION="v1.2.1"
 KUBE_PROM_STACK_VERSION="84.5.0"
+
+# Load-generator container images. fortio is version-tagged. grpcbin is
+# digest-pinned because the upstream maintainer hasn't pushed a versioned
+# tag since 2022; the digest below is for what was :latest on that date
+# and is what the lab was validated against.
+FORTIO_IMAGE="fortio/fortio:1.75.1"
+GRPCBIN_IMAGE="moul/grpcbin@sha256:bd8f2ffdd02d0849fad2d1c754eff4402c867e7a3e0552b8992f4590f5687d20"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ISTIOCTL="${SCRIPT_DIR}/istioctl"
 MANIFESTS="${SCRIPT_DIR}/manifests"
@@ -171,9 +179,6 @@ else
     kubectl --context "${CONTEXT}" rollout status deployment/istio-ingressgateway -n "${NAMESPACE_ISTIO}" --timeout=120s >/dev/null
 fi
 
-# Step 4 (collapsed into Step 3 above; numbering preserved for stdout)
-echo "[4/9] (collapsed into step 3)"
-
 # Confirm worker thread count matches CPU limit. The istio-proxy image is
 # distroless and does not include curl, so we use pilot-agent to talk to
 # the local Envoy admin port.
@@ -209,7 +214,8 @@ kubectl --context "${CONTEXT}" rollout status deployment/httpbin -n "${NAMESPACE
 
 # --- Step 6: Apply load generators (fortio + h2dial) ------------------------
 echo "[6/9] Applying load generators..."
-kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/04-loadgen.yaml" >/dev/null
+sed "s|\${FORTIO_IMAGE}|${FORTIO_IMAGE}|g" "${MANIFESTS}/04-loadgen.yaml" \
+    | kubectl --context "${CONTEXT}" apply -f - >/dev/null
 kubectl --context "${CONTEXT}" rollout status deployment/fortio -n "${NAMESPACE_LOAD}" --timeout=120s >/dev/null
 
 # h2dial: custom Go HTTP/2 client with shared-transport pool semantics.
@@ -250,7 +256,8 @@ kubectl --context "${CONTEXT}" rollout status deployment/ghz -n "${NAMESPACE_LOA
 # grpcbin: gRPC backend for scenario 12. Two replicas (ambient mode);
 # reflection enabled.
 echo "  Applying grpcbin backend..."
-kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/12-grpcbin.yaml" >/dev/null
+sed "s|\${GRPCBIN_IMAGE}|${GRPCBIN_IMAGE}|g" "${MANIFESTS}/12-grpcbin.yaml" \
+    | kubectl --context "${CONTEXT}" apply -f - >/dev/null
 kubectl --context "${CONTEXT}" rollout status deployment/grpcbin -n "${NAMESPACE_APP}" --timeout=120s >/dev/null
 
 # --- Step 7: Apply waypoint (for scenarios 6-7) -----------------------------

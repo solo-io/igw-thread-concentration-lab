@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
       - name: fortio
-        image: fortio/fortio:latest
+        image: ${FORTIO_IMAGE}
         # The fortio image is distroless (no /bin/sh). Run `fortio server`
         # for the keep-alive process; this serves the fortio web UI on
         # port 8080 and stays alive. Actual load tests are driven via

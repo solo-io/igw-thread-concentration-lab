@@ -26,6 +26,23 @@
 
 set -euo pipefail
 
+# --- Cleanup on exit --------------------------------------------------------
+# Background samplers (cpu_sampler, metric_sampler) loop on a sentinel
+# file. The normal stop_*_sampler helpers `rm` the sentinel; this trap is
+# the safety net for Ctrl-C, set -e exits, or anything else that bypasses
+# the helpers. Also kills any of our backgrounded shell jobs so they don't
+# survive the script.
+cleanup_on_exit() {
+    if [[ -n "${RESULTS_DIR:-}" && -d "${RESULTS_DIR}" ]]; then
+        find "${RESULTS_DIR}" -name '.cpu_sampler.running' -delete 2>/dev/null || true
+        find "${RESULTS_DIR}" -name '.metric_sampler.running' -delete 2>/dev/null || true
+    fi
+    local pids
+    pids="$(jobs -pr 2>/dev/null || true)"
+    [[ -n "${pids}" ]] && kill ${pids} 2>/dev/null || true
+}
+trap cleanup_on_exit EXIT INT TERM
+
 # --- Argument parsing -------------------------------------------------------
 ONLY=""
 SKIP_EVAL=0
