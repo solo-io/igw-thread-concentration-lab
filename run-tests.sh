@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# run-tests.sh -- Execute the v2 scenario suite from PLAN.md.
+# run-tests.sh -- Execute the scenario suite. See PLAN.md for the
+# hypothesis design and per-scenario rationale.
 #
 # Each scenario:
 #   1. Apply the scenario's EnvoyFilter (or remove for no-overrides scenarios).
@@ -96,8 +97,11 @@ NAMESPACE_MONITORING="monitoring"
 
 IGW_URL="http://istio-ingressgateway.${NAMESPACE_ISTIO}:80"
 
-WARMUP_DURATION=15s
-MEASURE_DURATION=60s
+# Per-scenario warmup and measure durations (Go-style duration strings).
+# Override via config.env if you want longer measure runs for steadier
+# numbers, or shorter ones for fast iteration on a single scenario.
+: "${SCENARIO_WARMUP_DURATION:=15s}"
+: "${SCENARIO_MEASURE_DURATION:=60s}"
 
 # Stat name prefixes used everywhere.
 LISTENER_PREFIX='http.outbound_0.0.0.0_8080;'
@@ -379,8 +383,8 @@ run_h2dial_scenario() {
     for run in warmup measure; do
         echo "  Run: ${run}"
         reset_stats
-        local dur="${WARMUP_DURATION}"
-        [[ "${run}" == "measure" ]] && dur="${MEASURE_DURATION}"
+        local dur="${SCENARIO_WARMUP_DURATION}"
+        [[ "${run}" == "measure" ]] && dur="${SCENARIO_MEASURE_DURATION}"
 
         local cpu_sentinel=""
         local metric_sentinel=""
@@ -434,8 +438,8 @@ run_fortio_scenario() {
     for run in warmup measure; do
         echo "  Run: ${run}"
         reset_stats
-        local dur="${WARMUP_DURATION}"
-        [[ "${run}" == "measure" ]] && dur="${MEASURE_DURATION}"
+        local dur="${SCENARIO_WARMUP_DURATION}"
+        [[ "${run}" == "measure" ]] && dur="${SCENARIO_MEASURE_DURATION}"
 
         local sentinel=""
         if [[ "${run}" == "measure" ]]; then
@@ -558,8 +562,8 @@ if [[ -f "${ENVOYFILTERS}/scenario9-hol-blocking.yaml" ]] && should_run "09-hol-
     for run in warmup measure; do
         echo "  Run: ${run}"
         reset_stats
-        dur="${WARMUP_DURATION}"
-        [[ "${run}" == "measure" ]] && dur="${MEASURE_DURATION}"
+        dur="${SCENARIO_WARMUP_DURATION}"
+        [[ "${run}" == "measure" ]] && dur="${SCENARIO_MEASURE_DURATION}"
         sentinel=""
         if [[ "${run}" == "measure" ]]; then
             measure_from_ms_hol=$(($(date +%s) * 1000))
@@ -615,8 +619,8 @@ if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "1
     for run in warmup measure; do
         echo "  Run: ${run}"
         reset_stats
-        dur="${WARMUP_DURATION}"
-        [[ "${run}" == "measure" ]] && dur="${MEASURE_DURATION}"
+        dur="${SCENARIO_WARMUP_DURATION}"
+        [[ "${run}" == "measure" ]] && dur="${SCENARIO_MEASURE_DURATION}"
         sentinel=""
         if [[ "${run}" == "measure" ]]; then
             measure_from_ms_11=$(($(date +%s) * 1000))
@@ -662,8 +666,8 @@ if should_run "12-grpc-variant" && kctl get deploy grpcbin -n "${NAMESPACE_APP}"
     for run in warmup measure; do
         echo "  Run: ${run}"
         reset_stats
-        dur="${WARMUP_DURATION}"
-        [[ "${run}" == "measure" ]] && dur="${MEASURE_DURATION}"
+        dur="${SCENARIO_WARMUP_DURATION}"
+        [[ "${run}" == "measure" ]] && dur="${SCENARIO_MEASURE_DURATION}"
         sentinel=""
         if [[ "${run}" == "measure" ]]; then
             measure_from_ms_12=$(($(date +%s) * 1000))

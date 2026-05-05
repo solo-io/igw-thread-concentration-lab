@@ -21,6 +21,10 @@ README.md                                       # add the row to the scenarios t
 
 Re-run `./run-tests.sh --only NN-<name>` until the signal is clean. Then run the full suite once before committing to confirm you haven't perturbed anything else.
 
+## Configuration
+
+Tunable settings (cluster name, pinned versions, replica counts, scenario durations, image pins) live in `config.env.example`. To customize without touching the scripts, copy it to `config.env` (gitignored) and edit there. The scripts source `config.env` if it exists; defaults baked into the scripts are used otherwise. If you add a new knob that ought to be adjustable, surface it in `config.env.example` with a comment explaining the trade-off, and add a `: "${VAR_NAME:=<default>}"` line to whichever script consumes it.
+
 ## Style
 
 - Bash scripts use `set -euo pipefail` and explicit `--context $CONTEXT` on every `kubectl`, `helm`, and `istioctl` call. Don't rely on the default context.
