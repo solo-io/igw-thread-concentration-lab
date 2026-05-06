@@ -60,7 +60,10 @@ Usage: run-tests.sh [options]
   --skip-eval       Skip the hypothesis-evaluation block at the end (only useful with --only).
   -h | --help       This message.
 
-Without --only, all 16 scenarios run in sequence (~25-30 min).
+Without --only, the lab's default (IGW_CPU=1) runs 16 of the 17
+defined scenarios in sequence (~25-30 min); scenario 13 (within-pod
+connection balance) auto-skips because it requires concurrency >= 2.
+Set IGW_CPU=2+ in config.env and redeploy to exercise scenario 13.
 USAGE
             exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;

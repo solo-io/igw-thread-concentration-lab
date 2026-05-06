@@ -103,7 +103,11 @@ cp config.env.example config.env       # then edit (cluster name, versions, repl
 # 2. Deploy the cluster + base environment + dashboard (~6-8 min)
 ./deploy.sh
 
-# 3. Run all scenarios + collect metrics + render plots (~25-30 min)
+# 3. Run scenarios + collect metrics + render plots (~25-30 min).
+# Default (IGW_CPU=1): 16 of the 17 scenarios run; scenario 13
+# (within-pod connection balance) auto-skips because it requires
+# concurrency >= 2. Set IGW_CPU=2+ in config.env (then redeploy) to
+# enable scenario 13 and run the full 17.
 ./run-tests.sh
 
 # View live dashboards while the runner is going (port-forward starts in deploy.sh):
@@ -153,7 +157,7 @@ After `run-tests.sh` finishes, four things are worth looking at:
 
 1. **The hypothesis-evaluation block printed to stdout**. Plain text summary of which hypothesis passed, refused, or was inconclusive on this run, with the CV and GOAWAY numbers backing the call. This is the at-a-glance answer to "what just happened."
 2. **`results/<latest>/plots/`**. Six PNGs comparing scenarios side-by-side. `cv_across_scenarios.png` is the most important — it puts every scenario on one chart so you can see at a glance which levers move which clients.
-3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV — relevant for H-E2 / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
+3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV — relevant for H-E / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
 4. **The Grafana dashboard live during the run**. Watching the "CV across pods" panel rise as scenario 2 starts and fall as scenario 4's GOAWAYs fire is the moment the mechanism stops being abstract.
 
 ## Metrics: how to think about them
