@@ -6,7 +6,7 @@ This document explains *why* the lab is shaped the way it is. The README is the 
 
 A production failure mode that is hard to diagnose from aggregates: the Istio Ingress Gateway shows elevated tail latency under high RPS, while aggregate gateway CPU and memory remain moderate. The signature is **distributional**: a few worker threads on a few pods are pegged, while the rest sit idle.
 
-The lab tests four hypotheses about the mechanism and four canonical tuning levers. Each scenario isolates one variable. The point is not to prove a foregone conclusion: refutations are expected and informative, and several are called out explicitly in this document so you know what they would mean if you see them.
+The lab tests five hypotheses: four (H-A through H-D) about cross-pod and cross-stream concentration plus the canonical tuning levers, and one (H-E) about within-pod worker balance via Envoy's listener `connection_balance_config`. Each scenario isolates one variable. The point is not to prove a foregone conclusion: refutations are expected and informative, and several are called out explicitly in this document so you know what they would mean if you see them.
 
 ## Reproduction environment
 
@@ -66,13 +66,17 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Reasoning:** Envoy's default listener uses `SO_REUSEPORT`-style accept across worker threads, where each worker's accept loop competes for new connections. Whichever worker is least busy at accept time gets the connection; this is biased by workload type (a worker holding a hot HTTP/2 connection is less responsive on accept than an idle peer, so hot connections cluster). `ExactBalance` serializes accepts through a process-wide mutex and assigns each new connection to the worker with the fewest active connections.
 
-**Confirmation signal:** at `concurrency >= 2`, the **mean** of per-pod worker CV computed across `listener.0.0.0.0_8080.worker_N.downstream_cx_total` (the per-worker accept-counter that `connection_balance_config` directly affects) drops measurably between control and `ExactBalance` runs, while CV across pods is unchanged. Empirically at concurrency=2 with ~50 connections per pod, `ExactBalance` reduces mean worker CV by roughly 25% (e.g., 0.110 → 0.083 in a representative run). The **max** per-pod worker CV is similar in both regimes, because the kernel's `SO_REUSEPORT` accept race is good enough often enough that `ExactBalance` doesn't always eliminate the single worst pod's imbalance.
+**Confirmation signal:** at `concurrency >= 2`, the mean of per-pod worker CV computed across `listener.0.0.0.0_8080.worker_N.downstream_cx_total` (the per-worker accept-counter that `connection_balance_config` directly affects) is the right thing to look at. CV across pods is not the H-E signal; it should be unchanged whether `ExactBalance` is on or off (`connection_balance_config` is intra-pod only).
+
+**Empirical caveat: the H-E effect is conditional, not always-on.** Across three independent runs of scenario 13 in this lab at `concurrency=2` with c=300 distinct (~50 conns per pod), the treatment-vs-control mean per-pod worker CV ratio came out at 0.99 (no effect), 0.66 (-34%), and 1.40 (+40%, treatment slightly worse than the kernel race). The max ratio behaved the same way (0.78, 0.45, 2.50). The lab's earlier "ExactBalance reduces mean worker CV by ~25%" claim came from a single representative run; with three runs it averages out to roughly no effect at this scale.
+
+The mechanism is real: when the kernel `SO_REUSEPORT` race produces visible imbalance (control mean CV in the 0.10-0.15 range), `ExactBalance` clamps it back down (run 2's 0.145 → 0.095). When the kernel race already produces tight distribution (control mean CV near 0.07), there is no imbalance left to remove and the mutex overhead can make things slightly worse (run 3's 0.070 → 0.098). At this lab's scale the kernel race is good enough often enough that the lever's expected outcome is "no consistent improvement." Production environments at much higher new-connection rates may see different statistics; the lab cannot resolve that.
 
 `cpu_sampler.sh` snapshots per-worker counters every 5s during the measure window; `run-tests.sh`'s capture step writes per-pod worker CV to `worker_cv_per_pod.txt` and surfaces both mean and max on the scenario summary line.
 
-**To compare scenario 13 against a control:** apply `scenario1-baseline.yaml` (no listener overrides) with the same `-mode=distinct -c=300 -d=60s` h2dial load, capture per-pod worker CV, then apply scenario 13 and capture again. The control run shows the kernel's natural accept-race distribution; scenario 13 shows it under `ExactBalance`.
+**An auto-paired control runs alongside scenario 13.** `run-tests.sh` runs `13-conn-balance-control` (baseline EnvoyFilter, no listener overrides) immediately before `13-conn-balance` (with `connection_balance_config: exact_balance`). Both use the same load profile: `h2dial -mode=distinct -c=300 -d=60s`. The control captures the kernel's natural accept-race distribution; scenario 13 captures the same load under `ExactBalance`. Compare the mean of per-pod worker CV between the two. Scenario 1 is NOT the control here, because it runs at `c=100` for its H-A low-CV reference role.
 
-**Refutation:** the kernel race already produces even within-pod distribution at this RPS, so `ExactBalance` adds mutex overhead without measurable benefit. This is a real production trade-off: at very high new-connection rates `ExactBalance` becomes a bottleneck. For long-lived HTTP/2 (the regime this lab studies) new connections are rare and the mutex cost is unmeasurable.
+**Refutation:** at this lab's scale the kernel race produces tight enough within-pod distribution that `ExactBalance` adds mutex overhead without measurable benefit, and in some runs slightly worsens the mean per-pod worker CV. The three-run average is essentially a wash. This is a real production trade-off: at very high new-connection rates `ExactBalance` becomes a bottleneck via its serialization mutex. For long-lived HTTP/2 (the regime this lab studies) new connections are rare and the mutex cost is unmeasurable; the kernel race is correspondingly good enough.
 
 **Important:** this hypothesis is orthogonal to H-A through H-D. `connection_balance_config` does NOT redistribute connections across pods. It only affects within-pod worker assignment.
 
@@ -117,7 +121,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) while pinning
 | 04-fortio | mrpc (queueing client) | fortio `-c 2 -qps 5000`, mrpc 10000 | **H-C confirmation against queueing client** |
 | 05-fortio | windows (queueing client) | fortio `-c 2 -qps 5000`, windows: 1 MiB | **H-D** with queueing client |
 | 12 | grpc-variant | ghz `--connections=1`, grpcbin | gRPC inherits HTTP/2 concentration |
-| 13 | conn-balance | h2dial `-mode=distinct -c 300`, listener `connection_balance_config: exact_balance` | **H-E** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
+| 13 | conn-balance | h2dial `-mode=distinct -c 300`, listener `connection_balance_config: exact_balance` (auto-paired with `13-conn-balance-control`, same load + baseline filter) | **H-E** within-pod worker balance (skipped at concurrency=1; requires IGW_CPU>=2 in config.env + redeploy) |
 
 A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downstream_cx_active` query rises before p99 listener latency does. This validates the measurement-principle claim about CV as a leading indicator.
 

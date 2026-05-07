@@ -24,12 +24,12 @@ spec:
   - name: mesh
     port: 15008
     protocol: HBONE
-  # Replicas are bumped via a post-deploy `kubectl scale`; istiod's
-  # waypoint controller honors
-  # replica count from the Gateway resource via the
-  # gateway.istio.io/min-replicas annotation when it deploys the waypoint
-  # Deployment. We patch the Deployment in deploy.sh to scale to 3 (since
-  # the Gateway-API spec doesn't have a replicas field at L4).
+  # The Gateway-API spec doesn't expose a replicas field at L4. The
+  # istiod-managed waypoint Deployment defaults to 1 replica; deploy.sh
+  # runs `kubectl scale` to bring it up to ${WAYPOINT_REPLICAS} (default
+  # 3) after the Deployment exists. Single-replica leaves per-pod CV
+  # undefined, which is why scaling is required for the mechanism-
+  # transfer test in scenarios 6 and 7.
 #
 # The httpbin Service does NOT opt into the waypoint by default. Ambient
 # traffic to httpbin uses ztunnel only (L4 path) for scenarios 1-5.

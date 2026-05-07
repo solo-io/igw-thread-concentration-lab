@@ -289,6 +289,60 @@
           "unit": "Bps"
         }
       }
+    },
+    {
+      "title": "H-E: within-pod worker CV (only meaningful at concurrency >= 2)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "id": 11,
+      "description": "Per-pod CV across per-worker listener connection counters. Falls when scenario 13's connection_balance_config: exact_balance is engaged. Empty at concurrency=1 (single worker per pod) or during scenarios with too few connections per pod for within-worker variance to be defined. Istio's stats_tags doesn't extract a `worker_id` label, so the worker number stays in the metric name itself (envoy_listener_worker_N_downstream_cx_total). The query uses {__name__=~...} regex matching to aggregate across worker numbers.",
+      "targets": [
+        {
+          "expr": "stddev by (pod) ({__name__=~\"envoy_listener_worker_[0-9]+_downstream_cx_total\", listener_address=\"0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}) / avg by (pod) ({__name__=~\"envoy_listener_worker_[0-9]+_downstream_cx_total\", listener_address=\"0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"})",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      }
+    },
+    {
+      "title": "H-E: per-pod per-worker connections (envoy_listener_downstream_cx_total)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "id": 12,
+      "description": "Per-pod per-worker cumulative connection count. Equal series within a pod = balanced workers; uneven = within-pod accept-race concentration. Use alongside the CV panel to the left to spot which worker is hot. label_replace lifts the worker number out of the metric name into a clean `worker` label for the legend.",
+      "targets": [
+        {
+          "expr": "label_replace({__name__=~\"envoy_listener_worker_[0-9]+_downstream_cx_total\", listener_address=\"0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}, \"worker\", \"$1\", \"__name__\", \"envoy_listener_(worker_[0-9]+)_downstream_cx_total\")",
+          "legendFormat": "{{pod}} {{worker}}",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "5s",

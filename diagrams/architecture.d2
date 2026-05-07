@@ -21,11 +21,9 @@ cluster: "k3d cluster: igw-tc-lab" {
     ztunnel: "ztunnel\n(DaemonSet)" { style.fill: "#d0bfff" }
     cni: "istio-cni\n(DaemonSet)" { style.fill: "#d0bfff" }
 
-    igw: "Istio Ingress Gateway\n(3 replicas, CPU=2)" {
+    igw: "Istio Ingress Gateway\n(6 replicas, 1 CPU each\n= 1 worker thread per pod\nat default IGW_CPU=1)" {
       style: { fill: "#a5d8ff"; stroke: "#4a9eed" }
-      pod1: "IGW pod 1"
-      pod2: "IGW pod 2"
-      pod3: "IGW pod 3"
+      pods: "pods 1..6"
     }
 
     waypoint: "waypoint\n(scenarios 6, 7)" { style.fill: "#eebefa" }

@@ -32,10 +32,17 @@ labels: bug
 Attach or paste the contents of the failing scenario's results dir.
 Usually the most useful files are:
 
-  results/<ts>/<scenario>/scenario.log
-  results/<ts>/<scenario>/stats_post.txt
-  results/<ts>/<scenario>/timeseries.csv
-  results/<ts>/<scenario>/clusters.json
+  results/<ts>/<scenario>/cv.txt                            (per-scenario summary CV + p99 line)
+  results/<ts>/<scenario>/h2dial-measure.txt                (or fortio-measure.txt / ghz-measure.txt, depending on scenario)
+  results/<ts>/<scenario>/cx_http2_total_per_pod.txt        (per-pod connection count; the headline distribution metric)
+  results/<ts>/<scenario>/flow_control_paused.txt           (relevant for H-D / windows scenarios)
+  results/<ts>/<scenario>/cx_max_requests_reached.txt       (relevant for H-C / count rotation scenarios)
+  results/<ts>/<scenario>/worker_cv_per_pod.txt             (relevant for H-E / scenario 13)
+  results/<ts>/<scenario>/timeseries.csv                    (only on s2-trigger; metric-sampler output)
+  results/<ts>/<scenario>/grafana.png                       (the dashboard screenshot for the measure window)
+
+Also useful: the runner's full stdout (typically saved by you when you ran it),
+which contains the hypothesis-evaluation block at the end.
 
 Redact anything sensitive before pasting.
 -->

@@ -89,3 +89,16 @@ jobs:
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             manifests/
+
+      # ----------------------------------------------------------------
+      # Go: compile h2dial. Without this, a syntax or import error in
+      # h2dial/main.go only surfaces during `docker build` in deploy.sh.
+      # Uses the committed go.mod + go.sum so CI's dependency tree is
+      # content-hash-identical to local and Dockerfile builds.
+      # ----------------------------------------------------------------
+      - name: Compile h2dial
+        working-directory: h2dial
+        run: |
+          go mod download
+          go vet ./...
+          go build ./...

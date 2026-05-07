@@ -9,13 +9,14 @@
 
 FROM golang:1.25-alpine AS build
 WORKDIR /src
+# go.mod and go.sum are committed; the build uses them directly so the
+# whole transitive dependency graph is content-hash-locked. v0.40.0 of
+# golang.org/x/net is the pinned direct dep; bump by editing go.mod and
+# running `go mod tidy` locally.
+COPY go.mod go.sum ./
+RUN go mod download
 COPY main.go .
-# Pin x/net to a version that works cleanly; latest tracks Go's main
-# branch and may require newer Go than this base image. v0.40.0 is
-# stable and supports Go 1.23+.
-RUN go mod init h2dial \
-    && go get golang.org/x/net/http2@v0.40.0 \
-    && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /h2dial main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /h2dial main.go
 
 FROM gcr.io/distroless/static-debian12
 COPY --from=build /h2dial /h2dial

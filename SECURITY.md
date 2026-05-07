@@ -21,6 +21,6 @@ In scope:
 
 Out of scope:
 
-- The Grafana `admin/admin` default credentials baked into `deploy.sh`. The lab is intentionally a local dev environment with no production data; the default password is documented and called out in the deploy script. If you are deploying this lab in a shared environment, change it.
+- The Grafana convenience credential baked into `deploy.sh` (default `admin` / `lab-igw`, configurable via `GRAFANA_ADMIN_PASSWORD` in `config.env`). The lab is intentionally a local k3d environment with no production data; the credential is documented in `config.env.example` and printed by `deploy.sh` at the end of every deploy. The password is deliberately NOT the literal `"admin"` because Grafana 9.5+ force-prompts a password change on first UI login when the password matches the default, which silently breaks Basic-auth calls from `run-tests.sh`'s screenshot-render path the moment a human opens the dashboard. The chosen non-default value plus `[security] disable_initial_admin_password_change = true` in the rendered grafana.ini lets human + automation share the same credential without interruption. If you are deploying this lab in a shared environment, override `GRAFANA_ADMIN_PASSWORD` in `config.env`; do NOT leave it at the documented default.
 - Issues in upstream Istio, Envoy, or Kubernetes (report those upstream).
 - Issues that require root access to a host already running the lab.

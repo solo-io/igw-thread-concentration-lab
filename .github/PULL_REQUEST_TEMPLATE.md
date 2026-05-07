@@ -22,7 +22,7 @@ what applies and delete the rest.
 - [ ] Row added to the scenarios table in `README.md` with "What it teaches" and "What to watch"
 - [ ] EnvoyFilter isolates one variable (no stacked knobs in a single scenario)
 - [ ] `run-tests.sh` block follows the existing pattern: apply filter, run load gen, capture stats, write to `results/<ts>/<scenario>/`
-- [ ] Re-ran the full suite locally and confirmed no regressions in unrelated scenarios
+- [ ] Re-ran the full suite locally and confirmed directional behavior unchanged for unrelated scenarios. (Note: at this lab's connection counts, specific CV magnitudes vary roughly 50% run-to-run; the relevant check is direction and rank-ordering, not absolute numbers. See README's "Findings (three independent runs)" for what is robust vs noisy.)
 - [ ] Attached the relevant slice of `results/<ts>/<scenario>/` (or summary numbers) below
 
 ## Sanitization

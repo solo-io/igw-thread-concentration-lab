@@ -16,19 +16,25 @@
 #
 # Measurement: run-tests.sh's capture_metrics() computes per-worker CV
 # from `listener.0.0.0.0_8080.worker_N.downstream_cx_total` and writes
-# it to worker_cv_per_pod.txt. The scenario summary surfaces the
-# worst-case worker CV across pods, which is the H-E confirmation
-# signal: this scenario should produce a lower worst-case worker CV
-# than a control run (e.g., scenario 1 with the same load profile but
-# no balance config) at the same concurrency.
+# it to worker_cv_per_pod.txt. The scenario summary surfaces both mean
+# and max worker CV across pods. The H-E confirmation signal is a drop
+# in MEAN per-pod worker CV between the auto-paired control run
+# (13-conn-balance-control, baseline filter, same load) and this
+# scenario.
 #
-# Load profile note: this scenario uses h2dial -mode=distinct with a
-# high connection count (300+), unlike the trigger scenarios which use
-# shared transport with c=500. The reason: the lab's shared-transport
-# regime has only 3-5 connections total across 6 pods, so most pods
-# get 0 or 1 connection and there is nothing to balance. distinct mode
-# with c=300 gives ~50 connections per pod, which is what makes
-# within-pod balance a meaningful question.
+# Load profile note: this scenario uses h2dial -mode=distinct with c=300,
+# giving roughly 50 connections per pod with kube-proxy random hashing.
+# At concurrency=2 that is roughly 25 connections per worker -- enough
+# for the binomial-variance signal of the kernel SO_REUSEPORT race to
+# stabilize over a 60s measure window, so ExactBalance's improvement is
+# measurable. Smaller load profiles (c=100, ~8 connections per worker)
+# leave run-to-run noise dominating the signal.
+#
+# run-tests.sh runs the control automatically just before this scenario
+# (same load profile, scenario1-baseline.yaml) so the comparison is
+# always paired on the exact same load and run window. Scenario 1 is
+# NOT used as the control because it runs at c=100 for its H-A
+# low-CV reference role.
 #
 # Reference:
 #   https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener.proto

@@ -34,9 +34,11 @@ set -euo pipefail
 # the helpers. Also kills any of our backgrounded shell jobs so they don't
 # survive the script.
 cleanup_on_exit() {
+    # Glob matches every sentinel a sampler might create. New samplers
+    # MUST follow the `.<name>_sampler.running` naming convention to be
+    # reaped here on Ctrl-C / set -e exit.
     if [[ -n "${RESULTS_DIR:-}" && -d "${RESULTS_DIR}" ]]; then
-        find "${RESULTS_DIR}" -name '.cpu_sampler.running' -delete 2>/dev/null || true
-        find "${RESULTS_DIR}" -name '.metric_sampler.running' -delete 2>/dev/null || true
+        find "${RESULTS_DIR}" -name '.*_sampler.running' -delete 2>/dev/null || true
     fi
     local pids
     pids="$(jobs -pr 2>/dev/null || true)"
@@ -63,7 +65,9 @@ Usage: run-tests.sh [options]
 Without --only, the lab's default (IGW_CPU=1) runs 16 of the 17
 defined scenarios in sequence (~25-30 min); scenario 13 (within-pod
 connection balance) auto-skips because it requires concurrency >= 2.
-Set IGW_CPU=2+ in config.env and redeploy to exercise scenario 13.
+Set IGW_CPU=2+ in config.env and redeploy to exercise scenario 13;
+its auto-paired control run (13-conn-balance-control) makes 18
+captured result directories at that point.
 USAGE
             exit 0 ;;
         *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -85,6 +89,9 @@ if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
     source "${SCRIPT_DIR}/config.env"
 fi
 : "${CLUSTER_NAME:=igw-tc-lab}"
+# Grafana admin password: must match what deploy.sh provisioned. NOT
+# the literal "admin" — see config.env.example for why.
+: "${GRAFANA_ADMIN_PASSWORD:=lab-igw}"
 CONTEXT="k3d-${CLUSTER_NAME}"
 
 MANIFESTS="${SCRIPT_DIR}/manifests"
@@ -110,6 +117,14 @@ IGW_URL="http://istio-ingressgateway.${NAMESPACE_ISTIO}:80"
 : "${SCENARIO_MEASURE_DURATION:=60s}"
 
 # Stat name prefixes used everywhere.
+# The trailing semicolon on LISTENER_PREFIX and CLUSTER_PREFIX is part of
+# Envoy's stat namespace separator: stats look like
+# `http.outbound_0.0.0.0_8080;.downstream_cx_active`. Querying without
+# the semicolon returns 0 silently. LISTENER_RAW is the listener-level
+# stat root (no trailing semicolon).
+# The IGW Service maps host port 80 to container port 8080, which is why
+# the listener prefix uses 8080 even though the Gateway resource specifies
+# port 80.
 LISTENER_PREFIX='http.outbound_0.0.0.0_8080;'
 LISTENER_RAW='listener.0.0.0.0_8080'
 CLUSTER_PREFIX='cluster.outbound|8080||httpbin.igw-test.svc.cluster.local;'
@@ -372,7 +387,7 @@ extract_p99() {
 # dashboard remains available at http://localhost:3000 for manual
 # screenshots if the renderer is unavailable.
 GRAFANA_URL="http://localhost:3000"
-GRAFANA_AUTH="admin:admin"
+GRAFANA_AUTH="admin:${GRAFANA_ADMIN_PASSWORD}"
 GRAFANA_DASHBOARD_UID="igw-thread-concentration"
 
 capture_grafana_screenshot() {
@@ -456,7 +471,7 @@ run_h2dial_scenario() {
 
     echo "  Capturing metrics..."
     capture_metrics "${out}"
-    capture_grafana_screenshot "${out}" "${measure_from_ms}" 0
+    capture_grafana_screenshot "${out}" "${measure_from_ms}"
 
     local p99
     p99="$(extract_p99 "${out}/h2dial-measure.txt")"
@@ -506,7 +521,7 @@ run_fortio_scenario() {
 
     echo "  Capturing metrics..."
     capture_metrics "${out}"
-    capture_grafana_screenshot "${out}" "${measure_from_ms}" 0
+    capture_grafana_screenshot "${out}" "${measure_from_ms}"
 
     local p99
     p99="$(extract_p99 "${out}/fortio-measure.txt")"
@@ -626,7 +641,7 @@ if [[ -f "${ENVOYFILTERS}/scenario9-hol-blocking.yaml" ]] && should_run "09-hol-
         fi
     done
     capture_metrics "${out_dir}"
-    capture_grafana_screenshot "${out_dir}" "${measure_from_ms_hol}" 0
+    capture_grafana_screenshot "${out_dir}" "${measure_from_ms_hol}"
     p99_hol="$(extract_p99 "${out_dir}/h2dial-measure.txt")"
     echo "  p99 latency (fast stream) = ${p99_hol}s" | tee -a "${out_dir}/cv.txt"
 fi
@@ -642,9 +657,9 @@ fi
 if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "11-realistic-filters"; then
     # Enable JWT validation on the IGW listener for this scenario.
     # h2dial sends the Istio demo JWT (publicly published, stable token).
-    # Validation runs in PERMISSIVE mode (no AuthorizationPolicy paired),
-    # AuthorizationPolicy enforces it), so the filter runs and incurs
-    # cost but does not reject requests.
+    # RequestAuthentication runs in permissive mode (no paired
+    # AuthorizationPolicy), so the JWT filter runs and incurs cost but
+    # does not reject requests.
     echo ""
     echo "  Applying RequestAuthentication for JWT validation..."
     kctl apply -f "${MANIFESTS}/11-jwt-auth.yaml" >/dev/null
@@ -765,14 +780,27 @@ if [[ -f "${ENVOYFILTERS}/scenario13-conn-balance.yaml" ]] && should_run "13-con
         echo "    2) ./cleanup.sh && ./deploy.sh"
         echo "    3) ./run-tests.sh --only 13-conn-balance"
     else
-        # Load profile is intentionally different from the trigger scenarios:
-        # distinct mode with c=300 gives ~50 connections per pod, so each
-        # pod's workers actually have multiple connections to balance. With
-        # shared mode (c=500 across the lab's 3-5 transport-pool conns),
-        # most pods get 0 or 1 connection and there's nothing to balance.
+        # Two paired runs at c=300 distinct so each pod sees ~50 connections,
+        # spread across 2+ workers. Strong enough binomial-variance signal to
+        # distinguish kernel-race from ExactBalance over a 60s measure window.
+        # Scenario 1 cannot serve as the control here because it runs at c=100
+        # (its H-A reference role); the kernel-race signal at c=100 is too
+        # noisy to compare against. We force-run both 13-conn-balance-control
+        # (baseline filter, no listener overrides) and 13-conn-balance
+        # (ExactBalance) regardless of --only because they're a measurement
+        # pair: the control is meaningless without the scenario, and vice
+        # versa.
+        saved_only="${ONLY}"
+        ONLY=""
+        # Control: same load profile, baseline filter, kernel-driven accept.
+        run_h2dial_scenario "13-conn-balance-control" \
+            "${ENVOYFILTERS}/scenario1-baseline.yaml" \
+            "${IGW_URL}/bytes/16384" 300 distinct
+        # Treatment: same load profile, listener connection_balance_config.
         run_h2dial_scenario "13-conn-balance" \
             "${ENVOYFILTERS}/scenario13-conn-balance.yaml" \
             "${IGW_URL}/bytes/16384" 300 distinct
+        ONLY="${saved_only}"
     fi
 fi
 
@@ -869,6 +897,27 @@ echo "     CV at IGW pods, baseline = ${S6_CV}, trigger = ${S7_CV}"
 if [[ -f "${RESULTS_DIR}/07-waypoint-trigger/waypoint_cv.txt" ]]; then
     S7_WP_CV="$(awk '/^WAYPOINT_CV:/{print $2}' "${RESULTS_DIR}/07-waypoint-trigger/waypoint_cv.txt")"
     echo "     CV at waypoint pods, trigger = ${S7_WP_CV}"
+fi
+
+# H-E (within-pod worker balance): only meaningful when scenario 13 ran,
+# which requires concurrency >= 2. Compare 13-conn-balance-control (baseline
+# filter, kernel-driven accept distribution) against 13-conn-balance (under
+# ExactBalance). Both run -mode=distinct -c=300 so the control is a clean
+# paired measurement at the same load profile, not scenario 1 (which uses
+# c=100 for its H-A reference role).
+SCTL_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance-control/cv.txt" 2>/dev/null)"
+S13_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance/cv.txt" 2>/dev/null)"
+if [[ -n "${S13_WORKER_CV_MEAN}" && "${S13_WORKER_CV_MEAN}" != "0" && "${S13_WORKER_CV_MEAN}" != "0.000" ]]; then
+    echo ""
+    echo "  H-E (within-pod worker balance via connection_balance_config):"
+    echo "     mean per-pod worker CV: control (kernel race) = ${SCTL_WORKER_CV_MEAN:-n/a}, scenario 13 (ExactBalance) = ${S13_WORKER_CV_MEAN}"
+    if awk -v c="${SCTL_WORKER_CV_MEAN:-0}" -v e="${S13_WORKER_CV_MEAN}" 'BEGIN{exit !(c > 0 && e < c * 0.9)}'; then
+        echo "     PASS: ExactBalance reduced mean per-pod worker CV by >=10% vs the control"
+    elif [[ -z "${SCTL_WORKER_CV_MEAN}" || "${SCTL_WORKER_CV_MEAN}" == "0" || "${SCTL_WORKER_CV_MEAN}" == "0.000" ]]; then
+        echo "     INCONCLUSIVE: control worker CV is zero or missing (likely concurrency=1 or capture failed)"
+    else
+        echo "     INVESTIGATE: ExactBalance did not reduce mean worker CV vs the control"
+    fi
 fi
 
 echo ""

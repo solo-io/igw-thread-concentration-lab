@@ -12,16 +12,18 @@
 #   1. k3d cluster (1 server + 2 agents), Traefik disabled (learning L001).
 #   2. Istio 1.27.8 ambient profile, with k3s-specific CNI directory overrides
 #      (learning L002), since k3s does not use the standard CNI paths.
-#   3. Standard istio-ingressgateway (3 replicas, 2 CPU per replica),
-#      plaintext listener on port 80 to remove TLS variance from p99
+#   3. Standard istio-ingressgateway sized by IGW_REPLICAS x IGW_CPU
+#      (defaults: 6 replicas, 1 CPU each = 6 worker threads total).
+#      Plaintext listener on port 80 to remove TLS variance from p99
 #      measurements.
 #   4. mccutchen/go-httpbin backend with an explicit command (learning on
 #      its CMD-not-ENTRYPOINT image) so /bytes/N and /delay/0 are reachable.
-#   5. fortio load generator as a Deployment.
-#   6. kube-prometheus-stack (Prometheus + Grafana + ServiceMonitors) for
-#      visualization. PASS/FAIL determination in run-tests.sh uses direct
-#      curl :15000/stats from the gateway pod, not Prometheus.
-#   7. Optional: waypoint resource for scenarios 6 and 7 (mechanism-transfer test).
+#   5. fortio + h2dial + ghz load generators as Deployments.
+#   6. kube-prometheus-stack (Prometheus + Grafana + PodMonitors) for
+#      visualization. run-tests.sh reads stats directly from the IGW pod
+#      via `pilot-agent request GET stats` against the local Envoy admin
+#      (the istio-proxy container has no curl), not from Prometheus.
+#   7. Waypoint resource for scenarios 6 and 7 (mechanism-transfer test).
 #
 # Run-tests is a separate script so the same cluster can be re-used across
 # scenario loops without re-deploying.
@@ -47,10 +49,21 @@ fi
 : "${KUBE_PROM_STACK_VERSION:=84.5.0}"
 : "${FORTIO_IMAGE:=fortio/fortio:1.75.1}"
 : "${GRPCBIN_IMAGE:=moul/grpcbin@sha256:bd8f2ffdd02d0849fad2d1c754eff4402c867e7a3e0552b8992f4590f5687d20}"
+# Grafana image renderer: amd64-only image, pulled with --platform and
+# imported into k3d so the kube-prometheus-stack Helm install can run it
+# as a sidecar (works on Apple Silicon under Rosetta and on Linux amd64
+# natively). Update by checking
+#   curl -s 'https://hub.docker.com/v2/repositories/grafana/grafana-image-renderer/tags?page_size=10&ordering=last_updated'
+: "${RENDERER_IMAGE:=grafana/grafana-image-renderer:v5.8.3}"
 : "${IGW_REPLICAS:=6}"
 : "${IGW_CPU:=1}"
 : "${IGW_HTTP_PORT:=18080}"
 : "${WAYPOINT_REPLICAS:=3}"
+# Grafana admin password. NOT "admin": Grafana 9.5+ force-prompts a
+# change on first UI login if password is literally "admin", which
+# breaks shared human+automation access. See config.env.example for
+# the full rationale.
+: "${GRAFANA_ADMIN_PASSWORD:=lab-igw}"
 CONTEXT="k3d-${CLUSTER_NAME}"
 
 ISTIOCTL="${SCRIPT_DIR}/istioctl"
@@ -114,9 +127,12 @@ kubectl --context "${CONTEXT}" wait --for=condition=Ready nodes --all --timeout=
 # ContainerCreating with the kubelet error "failed to find plugin
 # 'istio-cni' in path [/bin]".
 #
-# IGW sizing: replicas=3, CPU=2 per pod = 6 worker threads total. Enough
-# for per-pod coefficient-of-variation and per-thread distribution to be
-# observable while staying laptop-friendly.
+# IGW sizing: defaults are IGW_REPLICAS=6 with IGW_CPU=1 (one worker
+# thread per pod, 6 worker threads total). Enough pods for per-pod
+# coefficient-of-variation to be meaningful (less than 4 makes CV
+# noisy); single-thread keeps scenario 13's within-pod balance lever
+# off by default while staying laptop-friendly. Set IGW_CPU=2+ in
+# config.env to enable scenario 13 (within-pod connection balance).
 if kubectl --context "${CONTEXT}" get deployment istiod -n "${NAMESPACE_ISTIO}" &>/dev/null \
    && kubectl --context "${CONTEXT}" get deployment istio-ingressgateway -n "${NAMESPACE_ISTIO}" &>/dev/null; then
     echo "[3/9] Istio (control plane + IGW) already installed"
@@ -126,9 +142,11 @@ else
     # Auto-detection from CPU limits is unreliable across hosts (k3d,
     # kind, EKS all behave subtly differently). Coupling concurrency to
     # IGW_CPU keeps "worker threads per pod" a single source of truth:
-    # set IGW_CPU=N in config.env to get N worker threads per pod, with
-    # the verification step below failing loudly if the pin doesn't
-    # take. (Required by scenario 13, which needs concurrency >= 2 to
+    # set IGW_CPU=N in config.env to get N worker threads per pod. The
+    # verification step below compares Envoy's actual concurrency to
+    # IGW_CPU and prints a loud WARNING (not an exit) on mismatch, so
+    # the user sees that scenario 13 results would be misleading.
+    # (Required by scenario 13, which needs concurrency >= 2 to
     # exercise within-pod connection balance.)
     "${ISTIOCTL}" install --context "${CONTEXT}" \
         --set profile=ambient \
@@ -186,14 +204,28 @@ else
     kubectl --context "${CONTEXT}" rollout status deployment/istio-ingressgateway -n "${NAMESPACE_ISTIO}" --timeout=120s >/dev/null
 fi
 
-# Confirm worker thread count matches CPU limit. The istio-proxy image is
+# Confirm worker thread count matches IGW_CPU. The istio-proxy image is
 # distroless and does not include curl, so we use pilot-agent to talk to
-# the local Envoy admin port.
+# the local Envoy admin port. On mismatch, print a loud WARNING and
+# continue: scenario 13 (the only consumer of this pin) auto-skips at
+# concurrency=1 and needs concurrency>=2 anyway, so a wrong concurrency
+# value mostly harms scenario 13's signal rather than the whole lab.
 echo "  Verifying Envoy concurrency on a gateway pod:"
 IGW_POD="$(kubectl --context "${CONTEXT}" get pod -n "${NAMESPACE_ISTIO}" -l app=istio-ingressgateway -o jsonpath='{.items[0].metadata.name}')"
-CONCURRENCY="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${IGW_POD}" -- pilot-agent request GET server_info 2>/dev/null | grep -oE '"concurrency": *[0-9]+' | head -1 || echo 'unknown')"
+CONCURRENCY_RAW="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${IGW_POD}" -- pilot-agent request GET server_info 2>/dev/null | grep -oE '"concurrency": *[0-9]+' | head -1)"
+CONCURRENCY_VAL="$(echo "${CONCURRENCY_RAW}" | grep -oE '[0-9]+' | head -1)"
 echo "    pod: ${IGW_POD}"
-echo "    ${CONCURRENCY}"
+if [[ -z "${CONCURRENCY_VAL}" ]]; then
+    echo "    WARNING: could not read Envoy concurrency from server_info."
+    echo "             Scenario 13 (within-pod worker balance) may be misleading."
+elif [[ "${CONCURRENCY_VAL}" -ne "${IGW_CPU}" ]]; then
+    echo "    WARNING: Envoy concurrency=${CONCURRENCY_VAL} does NOT match IGW_CPU=${IGW_CPU}."
+    echo "             The meshConfig pin did not take effect. Scenario 13 results"
+    echo "             will reflect concurrency=${CONCURRENCY_VAL}, not the requested IGW_CPU."
+    echo "             To debug: ${ISTIOCTL} pc bootstrap ${IGW_POD} -n ${NAMESPACE_ISTIO} | grep concurrency"
+else
+    echo "    OK: concurrency=${CONCURRENCY_VAL} (matches IGW_CPU)"
+fi
 
 # --- Install Gateway API CRDs (required for the waypoint resource) ---------
 # The waypoint in 06-waypoint.yaml uses gateway.networking.k8s.io/v1 which
@@ -288,40 +320,80 @@ echo "  Bumping waypoint replicas to ${WAYPOINT_REPLICAS}..."
 kubectl --context "${CONTEXT}" scale deployment/igw-test-waypoint -n "${NAMESPACE_APP}" --replicas="${WAYPOINT_REPLICAS}" >/dev/null 2>&1 || true
 kubectl --context "${CONTEXT}" rollout status deployment/igw-test-waypoint -n "${NAMESPACE_APP}" --timeout=120s >/dev/null 2>&1 || true
 
-# --- Step 8: Install kube-prometheus-stack ---------------------------------
+# Pre-pull and side-load the Grafana image renderer. The image is amd64-
+# only; we pull with --platform=linux/amd64 so on Apple Silicon hosts
+# Docker Desktop fetches the amd64 manifest (the renderer pod then runs
+# under Rosetta), and on amd64 hosts the platform flag is a no-op.
+# `k3d image import` puts the image directly into the k3d node's
+# containerd, so the Helm-managed Deployment below uses
+# imagePullPolicy: Never and never round-trips to Docker Hub.
+# NOTE: tag form only (e.g., grafana/grafana-image-renderer:v5.8.3). A
+# digest pin (`repo@sha256:...`) would split incorrectly here; the helm
+# flags below would receive garbage. Documented in config.env.example.
+RENDERER_TAG="${RENDERER_IMAGE##*:}"
+RENDERER_REPO="${RENDERER_IMAGE%:*}"
+if docker image inspect "${RENDERER_IMAGE}" &>/dev/null; then
+    echo "  Grafana image renderer already pulled locally"
+else
+    echo "  Pulling Grafana image renderer ${RENDERER_TAG} (amd64; runs under Rosetta on Apple Silicon)..."
+    docker pull --platform=linux/amd64 "${RENDERER_IMAGE}" 2>&1 | tail -3
+fi
+echo "  Importing Grafana image renderer into k3d cluster..."
+k3d image import "${RENDERER_IMAGE}" --cluster "${CLUSTER_NAME}" 2>&1 | tail -2
+
+# --- Step 8: Install or reconcile kube-prometheus-stack --------------------
+# `helm upgrade --install` is idempotent: it installs the release if it
+# does not exist, and applies a values diff in place if it does. Always
+# running it (rather than skipping on existing-grafana) means version
+# bumps to KUBE_PROM_STACK_VERSION or RENDERER_IMAGE in config.env take
+# effect on the next deploy without needing to tear down the cluster.
 if kubectl --context "${CONTEXT}" get deployment -n "${NAMESPACE_MONITORING}" 2>/dev/null | grep -q grafana; then
-    echo "[8/9] Monitoring stack already installed"
+    echo "[8/9] Reconciling kube-prometheus-stack (helm upgrade --install)..."
 else
     echo "[8/9] Installing kube-prometheus-stack via Helm..."
-    helm --kube-context "${CONTEXT}" repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
-    helm --kube-context "${CONTEXT}" repo update prometheus-community >/dev/null
-    kubectl --context "${CONTEXT}" create namespace "${NAMESPACE_MONITORING}" --dry-run=client -o yaml | \
-        kubectl --context "${CONTEXT}" apply -f - >/dev/null
-    # Grafana password is intentionally the literal "admin" because this
-    # is a local k3d cluster used for transient reproducer runs. Never
-    # exposed; never reused for any real environment. The Helm chart
-    # default would otherwise generate a random password that we'd then
-    # have to fetch from a Secret to log in.
-    # NOTE: grafana-image-renderer plugin is NOT installed because the
-    # plugin is amd64-only and breaks Grafana startup on linux-arm64
-    # (Apple Silicon hosts via k3d). Run-tests.sh will print the live
-    # dashboard URL and capture-points; manual screenshots from a browser
-    # session are the documented fallback. If running on linux-amd64 you
-    # can re-enable the plugin by adding `--set grafana.plugins[0]=grafana-image-renderer`.
-    helm --kube-context "${CONTEXT}" upgrade --install kube-prom-stack \
-        prometheus-community/kube-prometheus-stack \
-        --version "${KUBE_PROM_STACK_VERSION}" \
-        --namespace "${NAMESPACE_MONITORING}" \
-        --set grafana.adminPassword=admin \
-        --set 'grafana.sidecar.dashboards.enabled=true' \
-        --set 'grafana.sidecar.dashboards.label=grafana_dashboard' \
-        --set 'grafana.sidecar.dashboards.searchNamespace=ALL' \
-        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-        --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
-        --wait --timeout 5m 2>&1 | tail -5
-
-    kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/05-monitoring.yaml" >/dev/null
 fi
+helm --kube-context "${CONTEXT}" repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update >/dev/null
+helm --kube-context "${CONTEXT}" repo update prometheus-community >/dev/null
+kubectl --context "${CONTEXT}" create namespace "${NAMESPACE_MONITORING}" --dry-run=client -o yaml | \
+    kubectl --context "${CONTEXT}" apply -f - >/dev/null
+# Grafana admin password is GRAFANA_ADMIN_PASSWORD (default lab-igw).
+# We deliberately avoid the literal "admin" because Grafana 9.5+
+# force-prompts a change on first UI login in that case, which breaks
+# Basic-auth calls from run-tests.sh's screenshot path the moment a
+# human opens the dashboard. The cluster is transient and never
+# exposed, so the convenience-credential framing is fine. Belt-and-
+# suspenders: we also pass [security] disable_initial_admin_password_change
+# = true below so the prompt is suppressed regardless of password.
+#
+# The image renderer is enabled as a SIDECAR Deployment (separate
+# pod), not as the in-process Grafana plugin. The plugin is statically
+# linked to Grafana's architecture and breaks startup on linux-arm64.
+# The sidecar image is amd64-only too, but it runs in its own pod, so
+# on arm64 hosts it runs under Rosetta without dragging Grafana with
+# it. imagePullPolicy=Never (paired with the `k3d image import` above)
+# forces kubelet to use the pre-imported image and fail fast with
+# ErrImageNeverPull if the import didn't land. On arm64 hosts the
+# registry has no matching manifest, so Never also prevents a slow
+# fallback pull that would only crash later with a confusing manifest
+# error.
+helm --kube-context "${CONTEXT}" upgrade --install kube-prom-stack \
+    prometheus-community/kube-prometheus-stack \
+    --version "${KUBE_PROM_STACK_VERSION}" \
+    --namespace "${NAMESPACE_MONITORING}" \
+    --set "grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD}" \
+    --set 'grafana.grafana\.ini.security.disable_initial_admin_password_change=true' \
+    --set 'grafana.sidecar.dashboards.enabled=true' \
+    --set 'grafana.sidecar.dashboards.label=grafana_dashboard' \
+    --set 'grafana.sidecar.dashboards.searchNamespace=ALL' \
+    --set grafana.imageRenderer.enabled=true \
+    --set "grafana.imageRenderer.image.repository=${RENDERER_REPO}" \
+    --set "grafana.imageRenderer.image.tag=${RENDERER_TAG}" \
+    --set grafana.imageRenderer.image.pullPolicy=Never \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+    --wait --timeout 5m 2>&1 | tail -5
+
+kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/05-monitoring.yaml" >/dev/null
 
 # Build the dashboard ConfigMap from the standalone JSON file in
 # `dashboard/`. This makes `dashboard/igw-thread-concentration.json` the single source
@@ -355,8 +427,13 @@ fi
 echo "[9/9] Smoke-testing the data path through the gateway..."
 sleep 5  # let endpoints settle
 SMOKE="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_LOAD}" deploy/fortio -- \
-    fortio curl -quiet "http://istio-ingressgateway.istio-system:80/get" 2>&1 | head -3 || true)"
-if echo "${SMOKE}" | grep -q "200"; then
+    fortio curl "http://istio-ingressgateway.istio-system:80/get" 2>&1 | head -10 || true)"
+# Match on "HTTP/<ver> 200 ..." so a Content-Length: 200 or similar
+# stray "200" elsewhere in the response can't false-pass. Note: fortio's
+# `-quiet` flag strips the HTTP status line, leaving only the response
+# body — which does NOT contain "HTTP/.* 200". So we run without -quiet
+# and capture enough of the head to include the status line.
+if echo "${SMOKE}" | grep -Eq 'HTTP/[0-9.]+ 200'; then
     echo "  PASS: gateway returned 200 for /get"
 else
     echo "  WARN: smoke test did not return 200. Output:"
@@ -373,6 +450,6 @@ echo "Backend:    kubectl --context ${CONTEXT} get pods -n ${NAMESPACE_APP} -l a
 echo "Loadgen:    kubectl --context ${CONTEXT} get pods -n ${NAMESPACE_LOAD} -l app=fortio"
 echo "Waypoint:   kubectl --context ${CONTEXT} get pods -n ${NAMESPACE_APP} -l gateway.istio.io/managed=istio.io-mesh-controller"
 echo "Grafana:    kubectl --context ${CONTEXT} -n ${NAMESPACE_MONITORING} port-forward svc/kube-prom-stack-grafana 3000:80"
-echo "            (then open http://localhost:3000, user admin, password admin)"
+echo "            (then open http://localhost:3000, user admin, password ${GRAFANA_ADMIN_PASSWORD})"
 echo ""
 echo "Next: ./run-tests.sh"

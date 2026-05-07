@@ -4,6 +4,8 @@
 
 A self-contained k3d lab that reproduces, measures, and lets you tune **Istio Ingress Gateway thread concentration under low client connection cardinality**: the production failure mode where aggregate gateway CPU looks fine but a small number of worker threads saturate, driving tail latency.
 
+The lab installs upstream OSS Istio (1.27.x). The mechanism under test (HTTP/2 stream-to-worker pinning, plus the four canonical lever knobs and the within-pod balance lever) lives in upstream Envoy, so the findings carry directly to Solo Enterprise builds without re-running. If you want to use Solo Enterprise images, override the `hub` flag passed to `istioctl install` in `deploy.sh`; nothing else needs to change.
+
 The lab is built around four hypotheses about the mechanism and the levers that move it, plus a fifth orthogonal hypothesis (H-E) about within-pod worker balance via Envoy's `connection_balance_config`. Running it, reading the dashboards, and reading the per-scenario output should leave you with a working mental model of:
 
 - Why a few long-lived HTTP/2 connections can hot-spot an Istio gateway even when the gateway has plenty of capacity in aggregate.
@@ -74,7 +76,7 @@ The practical consequence: a server-side `max_concurrent_streams` reduction only
 Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 architecture.d2 architecture.png`.
 
 - **k3d cluster** `igw-tc-lab` (1 server + 2 agents) with Traefik disabled.
-- **Solo Enterprise for Istio 1.27.8**, ambient profile. `istio-cni` configured with k3s-specific CNI directory overrides (k3s does not use the standard `/etc/cni/net.d` and `/opt/cni/bin` paths).
+- **Upstream Istio 1.27.8**, ambient profile. `istio-cni` configured with k3s-specific CNI directory overrides (k3s does not use the standard `/etc/cni/net.d` and `/opt/cni/bin` paths). The `istioctl` binary is downloaded from the upstream `github.com/istio/istio` releases. To swap in Solo Enterprise images, override the `hub` and tag passed to `istioctl install` in `deploy.sh`; the scenarios and dashboards are unchanged.
 - **Standard `istio-ingressgateway`** at the edge: 6 replicas, 1 worker thread each. The HPA is deleted on deploy so low-CPU scenarios cannot scale it back to 1. The IGW pod template is patched with a `proxyStatsMatcher` annotation so Envoy emits the connection-, listener-, and flow-control-level stats the dashboard depends on (which Istio's default matcher excludes).
 - **`mccutchen/go-httpbin`** backend in `igw-test` namespace (ambient). Endpoints used: `/get` (default), `/bytes/N` (deterministic payloads, used in scenarios 5 and 8), `/delay/N` (slow-stream HOL test, scenario 9).
 - **Two load generators** in `loadgen` namespace, intentionally NOT in ambient (we are testing client HTTP/2 connection-pool behavior; we do not want a transparent proxy in the path):
@@ -90,9 +92,8 @@ Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 arch
 - **kubectl**, **helm** 3.x or 4.x, **bash**, **awk**, **curl**
 - **Python 3** with **matplotlib** for the comparison plots: `pip3 install --user matplotlib`
 - Internet access (for `istioctl 1.27.8`, the Gateway API CRDs, container images)
-- No Solo Enterprise license required (uses the public OSS Istio chart with the Solo registry hub)
 
-The lab runs on Apple Silicon and Linux. On Apple Silicon a couple of components run via Rosetta amd64 emulation (`ghz` and the Grafana image-renderer plugin); the lab notes both inline.
+The lab runs on Apple Silicon and Linux. On Apple Silicon two components run under Rosetta amd64 emulation: `ghz` (the gRPC load tester; it ships only an amd64 Linux binary) and the Grafana image-renderer (deployed as a sidecar container so screenshots work on arm64 hosts). Both are pulled with `--platform=linux/amd64` and side-loaded into the k3d cluster via `k3d image import` by `deploy.sh`.
 
 ## Quick start
 
@@ -104,14 +105,15 @@ cp config.env.example config.env       # then edit (cluster name, versions, repl
 ./deploy.sh
 
 # 3. Run scenarios + collect metrics + render plots (~25-30 min).
-# Default (IGW_CPU=1): 16 of the 17 scenarios run; scenario 13
-# (within-pod connection balance) auto-skips because it requires
-# concurrency >= 2. Set IGW_CPU=2+ in config.env (then redeploy) to
-# enable scenario 13 and run the full 17.
+# Default (IGW_CPU=1): 16 of the 17 scenarios run; scenario 13 (within-
+# pod connection balance) auto-skips because it requires concurrency >= 2.
+# Set IGW_CPU=2+ in config.env (then redeploy) to enable scenario 13;
+# its auto-paired `13-conn-balance-control` run brings the suite to 18
+# captured directories at that point.
 ./run-tests.sh
 
 # View live dashboards while the runner is going (port-forward starts in deploy.sh):
-open http://localhost:3000      # admin / admin
+open http://localhost:3000      # user: admin, password: lab-igw (or whatever you set GRAFANA_ADMIN_PASSWORD to)
 # Dashboard UID: igw-thread-concentration
 
 # 4. Tear down when done
@@ -136,20 +138,20 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate on
 | 1 | baseline | h2dial `-mode=distinct -c 100` | (none) | High connection diversity gives even per-pod distribution. | CV of `cx_active` low (~0.1). Reference value before introducing concentration. |
 | 2 | trigger | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 65536` (Istio default) | **The mechanism.** Few connections, no cap → streams pin to a few worker threads. | CV jumps (~1.0). Dashboard "Active connections per pod" shows 2-3 hot pods, the rest at zero. |
 | 3 | mcs-cap | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 128` | A smart client dials new connections when the cap is hit, redistributing. | CV drops vs s2; pool grows from ~3 to ~5 connections. Compare to s3-fortio below. |
-| 4 | mrpc | h2dial `-mode=shared -c 500` | `max_requests_per_connection: 10000` | **The most robust lever.** Server-issued GOAWAYs force rotation on every client. | `cx_max_requests_reached_total` non-zero. Even per-pod distribution. |
+| 4 | mrpc | h2dial `-mode=shared -c 500` | `max_requests_per_connection: 10000` | **The most robust lever.** Server-issued GOAWAYs force rotation on every client. | `cx_max_requests_reached` non-zero. Even per-pod distribution. |
 | 5 | windows | h2dial `-mode=shared`, `/bytes/16384` | `initial_*_window_size: 1 MiB` | Default 64 KiB windows can be a hidden bottleneck at high byte throughput on few connections. | `flow_control_paused_reading_total` rate. Compare s2 (~730/sec) to s5. |
 | 6 | waypoint-baseline | h2dial `-mode=distinct -c 100`, with waypoint | (none) | Sanity check that the waypoint hop on its own is fine. | CV low (~0.1). |
 | 7 | waypoint-trigger | h2dial `-mode=shared -c 500`, with waypoint | `max_concurrent_streams: 65536` | Same mechanism transfers through the L7 waypoint hop, and concentration **compounds** rather than dampening. | CV at the waypoint pods rises in step with the trigger; ztunnel HBONE metrics show concentration upstream of the waypoint too. |
 | 8 | buffers | h2dial `-mode=shared`, `/bytes/65536` | listener `per_connection_buffer_limit_bytes: 4 MiB` | Per-connection buffer pressure is a separate axis from flow-control windows. | `tx/rx_bytes_buffered` should drop. |
 | 9 | hol-blocking | h2dial 500 fast + 5 slow `/delay/2` workers | (none) | Slow streams block fast streams sharing the same connection. `stream_idle_timeout` does NOT catch this; only stream-cap reduction does. | p99 elevated vs s2 by the slow-stream tax. |
-| 10 | rotation | h2dial `-mode=shared -c 500` | `max_connection_duration: 10s` | Time-based rotation produces periodic spikes. In real mTLS, the spikes carry a handshake-CPU cost. | Periodic p99 spikes timed to ~10s; `cx_max_duration_reached_total` rate non-zero. |
+| 10 | rotation | h2dial `-mode=shared -c 500` | `max_connection_duration: 10s` | Time-based rotation produces periodic spikes. In real mTLS, the spikes carry a handshake-CPU cost. | Periodic p99 spikes timed to ~10s; `cx_max_duration_reached` rate non-zero. |
 | 11 | realistic-filters | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 65536` + access-log filter | Filter-chain overhead at scale. Most production stacks include a JSON access log and JWT validation. | Compare p99 to s2; a well-tuned filter chain (response-flag-filtered access log) is typically negligible. |
 | 02-fortio | trigger (fortio) | fortio `-c 2 -qps 5000` | `max_concurrent_streams: 65536` | Same mechanism as s2, queueing client. | High CV. |
 | 03-fortio | mcs-cap (fortio) | fortio `-c 2 -qps 5000` | `max_concurrent_streams: 128` | Confirms a queueing client does NOT dial out: cap reduction does nothing. | CV unchanged vs 02-fortio. **The point: don't expect `max_concurrent_streams` alone to fix things if your clients are queueing.** |
 | 04-fortio | mrpc (fortio) | fortio `-c 2 -qps 5000` | `max_requests_per_connection: 10000` | Confirms count rotation works on a queueing client. | Even per-pod distribution after ~20 GOAWAYs fire. The most important comparison in the whole lab. |
 | 05-fortio | windows (fortio) | fortio `-c 2 -qps 5000` | `initial_*_window_size: 1 MiB` | Same window tuning as s5 but driven by fortio. Confirms the window effect is independent of which client is pushing bytes. | Compare flow-control pause rate to s5. |
-| 12 | grpc-variant | ghz `--connections=1` against grpcbin | (none) | gRPC inherits HTTP/2's concentration semantics. Single `ClientConn` → single pod at the TCP layer. | CV at the pod level matches the analytical prediction; gRPC handshake fails on grpcbin TLS expectations but the connection-distribution finding is unaffected. |
-| 13 | conn-balance | h2dial `-mode=distinct -c 300` | listener `connection_balance_config: exact_balance` | **Within-pod worker balance** (third axis: kernel-driven accept races inside a multi-thread pod). Orthogonal to H-A through H-D; only relevant when `concurrency >= 2`. Uses distinct mode (not shared) because the lab's shared-transport regime has only 3-5 connections total — too few for within-pod balance to matter. | At concurrency=1 (lab default) the scenario auto-skips; at concurrency>=2 compare per-worker CV (from the `worker_cv_per_pod.txt` output of this scenario vs a control run with the same load profile but no balance config). To run: set `IGW_CPU=2+` in `config.env`, redeploy, then `./run-tests.sh --only 13-conn-balance`. |
+| 12 | grpc-variant | ghz `--connections=1` against grpcbin | (none) | gRPC inherits HTTP/2's concentration semantics. Single `ClientConn` → single pod at the TCP layer. | CV at the pod level matches the analytical prediction. The HBONE-routed gRPC stream may not always complete cleanly through the IGW, but the TCP-layer connection-distribution finding (the only signal this scenario claims) is unaffected. |
+| 13 | conn-balance | h2dial `-mode=distinct -c 300` (auto-paired control with same load + baseline filter, captured as `13-conn-balance-control/`) | listener `connection_balance_config: exact_balance` | **Within-pod worker balance** (third axis: kernel-driven accept races inside a multi-thread pod). Orthogonal to H-A through H-D; only relevant when `concurrency >= 2`. The runner auto-runs the control just before the scenario so both measurements are at the same load on the same cluster. | At concurrency=1 (lab default) the scenario auto-skips; at concurrency>=2 compare mean per-pod worker CV between `13-conn-balance/` and `13-conn-balance-control/`. To run: set `IGW_CPU=2+` in `config.env`, redeploy, then `./run-tests.sh --only 13-conn-balance` (the control runs automatically). |
 
 ### How to read the output
 
@@ -187,7 +189,7 @@ A coefficient of variation near 0 means even distribution. CV approaching 1.0 (o
 For "is rotation actually firing?", pair the gauge above with the count-rotation counter:
 
 ```promql
-rate(envoy_http_downstream_cx_max_requests_reached_total{
+rate(envoy_http_downstream_cx_max_requests_reached{
     http_conn_manager_prefix="outbound_0.0.0.0_8080"
 }[1m])
 ```
@@ -230,7 +232,7 @@ The full metric reference table — what each one tells you, where to find it in
 
 ### Notes on naming and selectors
 
-- **Counters carry the `_total` suffix in Prometheus** (OpenMetrics convention) even when the underlying Envoy stat is named without it. The PromQL above is what works against Prometheus, not what shows up in `pilot-agent request GET stats`.
+- **Envoy emits Prometheus stats with the same name as in the admin endpoint.** `source/server/admin/prometheus_stats.cc` does no suffix mangling, so a stat named `downstream_cx_http2_total` in `pilot-agent request GET stats` becomes `envoy_http_downstream_cx_http2_total` in Prometheus (the `_total` is part of the stat name itself, not an OpenMetrics auto-suffix). A stat named `downstream_cx_max_requests_reached` (no `_total`) appears in Prometheus as `envoy_http_downstream_cx_max_requests_reached`. When in doubt, dump `pilot-agent request GET stats` first; whatever comes back is what Prometheus stores under the `envoy_<subsystem>_` prefix.
 - **`istio_request_duration_milliseconds`** (Istio's wrapper histogram with rich source/destination/protocol labels) is also available and useful for production monitoring. The dashboard prefers Envoy's lower-level `envoy_http_downstream_rq_time` because it has fewer label-cardinality concerns under `proxyStatsMatcher`.
 - **`envoy_listener_downstream_cx_length_ms_bucket`** (connection-lifetime histogram) is captured but NOT used for the latency panel: it only updates on connection close, so it stays empty during long-lived shared-transport tests. Metric #8 is the right choice for live latency monitoring.
 
@@ -248,7 +250,7 @@ The dashboard JSON is at [`dashboard/igw-thread-concentration.json`](dashboard/i
 `deploy.sh` starts a background port-forward to Grafana on `localhost:3000` and applies the dashboard via the `grafana_dashboard=1` label that kube-prometheus-stack's sidecar watches. After deploy:
 
 ```bash
-open http://localhost:3000/d/igw-thread-concentration    # admin / admin
+open http://localhost:3000/d/igw-thread-concentration    # user: admin, password: lab-igw (default) or your GRAFANA_ADMIN_PASSWORD
 ```
 
 If the port-forward dies, restart it:
@@ -297,23 +299,26 @@ That is exactly what `deploy.sh` does in-cluster.
 
 ### Auto-screenshots during the run
 
-`run-tests.sh` attempts to capture a Grafana PNG per scenario via the `/render/d/...` API. **The Grafana image-renderer plugin is not available for `linux-arm64`** (Apple Silicon hosts), so on those systems the API call fails and the runner prints a "manual screenshot URL" with the right time range. Open the URL in a browser and screenshot manually. On `linux-amd64` hosts the renderer can be re-enabled by adding `--set grafana.plugins[0]=grafana-image-renderer` to the Helm install in `deploy.sh`.
+`run-tests.sh` captures a Grafana PNG per scenario via the `/render/d/...` API. The Grafana image-renderer image is amd64-only, but `deploy.sh` pulls it with `--platform=linux/amd64` and imports it into the k3d cluster, then enables it as a Helm-managed sidecar Deployment (`grafana.imageRenderer.enabled=true`). On Apple Silicon hosts the renderer pod runs under Rosetta; on Linux amd64 hosts it runs natively. Either way, screenshots land at `results/<ts>/<scenario>/grafana.png`. If the render API is still unreachable, the runner falls back to printing a manual screenshot URL with the right time range; open that URL in a browser and screenshot the dashboard yourself.
 
-## Findings (typical run)
+## Findings (three independent runs)
 
-Reading these is no substitute for running it yourself, but for reference, headline results from a representative run:
+Reading these is no substitute for running it yourself. The numbers below are aggregated across three back-to-back runs of the full suite at `IGW_CPU=2`. **What is robust across runs is the direction and rank-ordering of effects, not the specific magnitudes.** A few scenarios are reproducible to three decimal places (s12, s5-fortio); most others have ±20-50% run-to-run variance in CV at this lab scale because connection counts are small (N=2-5) and kube-proxy hash randomness dominates.
 
-| Hypothesis | Outcome | Numbers |
+| Hypothesis | Verdict across 3 runs | What we saw |
 |---|---|---|
-| H-A mechanism | **PASS** | CV jump 0.141 → 1.000 (7.1x). 100 distinct conns smooth; 3 shared-transport conns concentrate on 3 of 6 pods. |
-| H-B fortio (queue on cap) | **CONFIRMED** | s2-fortio CV ≈ 1.4, s3-fortio CV ≈ 2.2. Cap reduction never helps fortio's fixed pool. |
-| H-B h2dial (dial on cap) | **CONFIRMED** | s2 CV=1.000 (3 conns), s3 CV=0.825 (5 conns). Cap drives the shared transport to grow its pool. |
-| H-C count rotation | **STRONG PASS — works for ALL clients** | s4-h2dial: thousands of GOAWAYs, even distribution. s4-fortio: ~20 GOAWAYs sufficient to spread fortio across all 6 pods. **The most reliable server-side lever.** |
-| H-D HTTP/2 windows | **partial — saturation real, 1 MiB insufficient** | s2: ~730 flow-control pauses/sec at default 64 KiB. s5: ~577/sec at 1 MiB (21% drop, not zero). 4 MiB+ recommended for high-byte workloads. |
-| H-E within-pod worker balance (s13, only at `concurrency >= 2`) | **modest, real signal** | Empirically at concurrency=2, ~50 conns/pod: control mean per-pod worker CV ≈ 0.110; with `exact_balance` ≈ 0.083 (≈25% reduction). Max per-pod worker CV is similar in both regimes (~0.17–0.18); the kernel's `SO_REUSEPORT` race is good enough often enough that `exact_balance` doesn't always rescue the single worst pod. Auto-skipped at the lab's default `concurrency=1`. |
-| Filter chain overhead (s11) | **negligible at this scale** | s11 p99 within run-to-run variance of s2. A response-flag-filtered access log + JWT validation is not the bottleneck. |
-| Waypoint mechanism transfer | **CONFIRMED, amplified** | Waypoint trigger CV ≈ 1.45 (vs IGW-alone 1.00). Concentration compounds through the waypoint hop, not dampens. |
-| gRPC variant (s12) | **TCP-layer concentration confirmed** | ghz `--connections=1` → CV ≈ 2.2 (single ClientConn → single pod), as predicted analytically. |
+| H-A mechanism | **ROBUST, all runs PASS** | s2 CV / s1 CV jump factor in three runs: 17.2x, 5.3x, 5.2x. All well above the 2x PASS threshold. The magnitude depends heavily on which pods the 2-3 connections happen to hash to. |
+| H-B fortio (cap useless on queueing client) | **ROBUST, all runs CONFIRMED** | s3-fortio CV / s2-fortio CV: **1.00, 1.00, 1.00** (exact). Cap reduction does nothing for queueing clients; reproducible to 3 decimal places. |
+| H-B h2dial (cap drives smart-client to dial) | **NOISY** | s3 CV in three runs: 0.45, 1.28, 1.08. Direction (down from s2 with cap) inconsistent across runs because the smart client opens the same 5 connections each time but their hash distribution varies. Don't cite a magnitude. |
+| H-C count rotation on queueing client | **ROBUST, all runs CONFIRMED** | s4-fortio / s2-fortio CV ratio: 0.21, 0.26, 0.32 (68-79% reduction every run) with only 18-20 GOAWAYs over 60s. **The most reliable server-side lever for queueing-client topologies.** |
+| H-C count rotation on smart client | **ROBUST** | s4-mrpc fires 5,300-5,500 GOAWAYs (within 1.6% across runs); CV consistently below s3. p99 typically 50% better than s3. |
+| H-D HTTP/2 windows | **REFUTE at lab RTT, all runs** | s5 paused / s2 paused ratio: 1.43, 1.33, 1.21. Raising the window from 64 KiB to 1 MiB did NOT reduce flow-control pauses at intra-cluster RTT. The PLAN's "Out of scope" note about cross-AZ RTT applies; the lab demonstrates the mechanism but cannot quantify the right value at production RTT. |
+| H-E within-pod worker balance (s13, `concurrency >= 2`) | **NOT REPRODUCIBLE as stated** | s13 / s13c worker mean CV ratio in three runs: 0.99, 0.66, 1.40. Average ≈ no effect. The lever's effect is conditional on the kernel race producing visible imbalance. When the kernel race already produces tight distribution (control mean CV near 0.07), `ExactBalance` adds mutex overhead and can be slightly worse than control. Auto-skipped at the lab's default `concurrency=1`. |
+| Filter chain overhead (s11) | **negligible, all runs** | s11 p99 (84/91/82 ms across three runs) within 12% of s2's. A response-flag-filtered access log + JWT validation in permissive mode is not the bottleneck. |
+| Waypoint mechanism transfer | **ROBUST, all runs CONFIRMED** | s7 IGW-side CV: 2.236, 2.236, 1.414 across three runs. All show the mechanism transfers and amplifies through the L7 waypoint hop. The IGW-side `proxyStatsMatcher` carries the relevant counter; the waypoint-side capture path in `run-tests.sh` is a known coverage gap (label-propagation race; see waypoint_cv.txt comment). |
+| gRPC variant (s12) | **ROBUST, all runs CONFIRMED, 3-decimal reproducibility** | ghz `--connections=1` → CV = 2.236 in every run. Single `grpc.ClientConn` → single TCP connection → single hot pod, as predicted analytically. **The most direct reproduction of low-connection-cardinality client behavior.** |
+
+**What this means for citing the lab in production discussions.** Use the directions and the rank-ordering of levers, not the specific magnitudes from any one run. "Count rotation reduces queueing-client concentration by 65-80% in this lab; cap reduction reduces it by 0%" is robust. "CV drops from 0.110 to 0.083" is one observation, not a typical outcome.
 
 ## Troubleshooting
 
@@ -328,7 +333,7 @@ The build phase surfaced these gotchas. They are now handled by the scripts, but
 - **`istio-proxy` is heavily stripped down**. The container has no `sh`, no `curl`, no `top`, no `pgrep`, no `ps` — anything you'd reach for in a normal pod is unavailable. The only way in is `pilot-agent request GET <path>` against the local Envoy admin. The lab's per-worker measurement uses the admin's `listener.0.0.0.0_8080.worker_N.downstream_cx_*` counters for the same reason.
 - **Gateway API CRDs not installed by default**. Required for the waypoint resource. `deploy.sh` installs `kubernetes-sigs/gateway-api` v1.2.1.
 - **IGW listener stat prefix has a trailing semicolon**: `http.outbound_0.0.0.0_8080;`. Stat queries assuming no semicolon return zeros silently.
-- **`grafana-image-renderer` plugin is amd64-only**. Linux-arm64 hosts (Apple Silicon) must use manual screenshots.
+- **`grafana-image-renderer` is amd64-only**. We avoid the in-process Grafana plugin (which is statically linked against Grafana's architecture and breaks the arm64 Grafana container) and instead deploy it as a separate sidecar pod, pulled with `--platform=linux/amd64` and imported into k3d. On Apple Silicon hosts the sidecar runs under Rosetta; on amd64 hosts it runs natively. If the sidecar fails to start, `run-tests.sh` falls back to printing a manual screenshot URL.
 - **h2dial `-idle` mode**. `select {}` triggers Go's deadlock detector when no other goroutines exist. Use `for { time.Sleep(time.Hour) }` instead.
 - **k3d Traefik must be disabled**. Default k3d ships with Traefik, which conflicts with the IGW for port 80. The cluster-create command in `deploy.sh` includes `--k3s-arg "--disable=traefik@server:0"`.
 - **Istio CNI on k3d** uses non-standard CNI directories (`/var/lib/rancher/k3s/agent/etc/cni/net.d` and `/bin`, not the upstream defaults). The `helm install istio-cni` command in `deploy.sh` sets these explicitly.

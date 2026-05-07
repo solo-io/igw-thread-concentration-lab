@@ -15,7 +15,7 @@ flowchart TB
     fConn1 -.cap reached.-> fServer
     fConn2 -.cap reached.-> fServer
 
-    fResult["Result:<br/>Streams queue at app layer<br/>No new connections opened<br/>Cap reduction has NO effect on distribution<br/>CV = 0.707 in BOTH s2 and s3"]:::fortioResult
+    fResult["Result:<br/>Streams queue at app layer<br/>No new connections opened<br/>Cap reduction has NO effect on distribution<br/>CV across pods is unchanged between s2 and s3<br/>(observed identical to 3 decimal places across runs)"]:::fortioResult
 
     fServer --> fResult
 
@@ -50,7 +50,7 @@ flowchart TB
     hConn3 -.-> hServer
     hConnN -.-> hServer
 
-    hResult["Result:<br/>Pool sees existing conns saturated<br/>Dials new connections (Go 1.21+)<br/>Load redistributes across pods<br/>cap=65536 -> 3 conns. cap=128 -> 5 conns. CV drops 60%"]:::h2dialResult
+    hResult["Result:<br/>Pool sees existing conns saturated<br/>Dials new connections (Go 1.21+)<br/>Load redistributes across pods<br/>cap=65536 -> 2-3 conns. cap=128 -> 5 conns.<br/>CV typically drops vs s2 (magnitude varies run-to-run)"]:::h2dialResult
 
     hServer --> hResult
 

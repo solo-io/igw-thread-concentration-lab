@@ -76,7 +76,7 @@ def plot_cv_across_scenarios(results: Path, scenarios: list[Path]) -> None:
         "Per-pod connection-distribution variance across scenarios\n"
         "(higher = more concentrated; fortio scenarios in lighter blue)"
     )
-    ax.axvline(0.5, color="gray", linestyle="--", alpha=0.4, label="reference: 0.5 = 1 idle pod of 3")
+    ax.axvline(0.5, color="gray", linestyle="--", alpha=0.4, label="reference: CV = 0.5 (significant concentration)")
     ax.legend(loc="lower right")
     ax.invert_yaxis()
     plt.tight_layout()
