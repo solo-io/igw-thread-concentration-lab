@@ -25,6 +25,10 @@
 #   $4: SENTINEL_PATH (delete this file to stop the sampler)
 #   $5: INTERVAL (seconds between samples; default 5)
 
+# Deliberately omit `-e`: a transient kubectl error on one sample
+# (network blip, pod transition) should NOT terminate the sampler. The
+# main loop will retry on the next tick. The parent run-tests.sh removes
+# the sentinel file when it wants this loop to exit cleanly.
 set -uo pipefail
 
 CONTEXT="$1"

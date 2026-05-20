@@ -158,7 +158,7 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate on
 After `run-tests.sh` finishes, four things are worth looking at:
 
 1. **The hypothesis-evaluation block printed to stdout**. Plain text summary of which hypothesis passed, refused, or was inconclusive on this run, with the CV and GOAWAY numbers backing the call. This is the at-a-glance answer to "what just happened."
-2. **`results/<latest>/plots/`**. Six PNGs comparing scenarios side-by-side. `cv_across_scenarios.png` is the most important — it puts every scenario on one chart so you can see at a glance which levers move which clients.
+2. **`results/<latest>/plots/`**. Six PNGs comparing scenarios side-by-side. `cv_across_scenarios.png` is the most important: it puts every scenario on one chart so you can see at a glance which levers move which clients.
 3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV — relevant for H-E / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
 4. **The Grafana dashboard live during the run**. Watching the "CV across pods" panel rise as scenario 2 starts and fall as scenario 4's GOAWAYs fire is the moment the mechanism stops being abstract.
 

@@ -30,9 +30,9 @@ spec:
   # 3) after the Deployment exists. Single-replica leaves per-pod CV
   # undefined, which is why scaling is required for the mechanism-
   # transfer test in scenarios 6 and 7.
-#
-# The httpbin Service does NOT opt into the waypoint by default. Ambient
-# traffic to httpbin uses ztunnel only (L4 path) for scenarios 1-5.
-# run-tests.sh adds the `istio.io/use-waypoint=igw-test-waypoint` label
-# to the httpbin Service at the start of scenario 6 and removes it
-# again at scenario teardown.
+  #
+  # The httpbin Service does NOT opt into the waypoint by default.
+  # Ambient traffic to httpbin uses ztunnel only (L4 path) for scenarios
+  # 1-5. run-tests.sh adds the `istio.io/use-waypoint=igw-test-waypoint`
+  # label to the httpbin Service at the start of scenario 6 and removes
+  # it again at scenario teardown.

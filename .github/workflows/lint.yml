@@ -80,10 +80,17 @@ jobs:
       # CRD support so it doesn't choke on EnvoyFilter / Gateway / etc.
       # We point at the upstream Istio + Gateway-API schema bundles for
       # the CRDs and skip kinds we know aren't covered.
+      #
+      # Pinned to a tagged release (not `releases/latest`) so a future
+      # upstream rebuild can't silently change CI behavior. Update by
+      # checking `gh api /repos/yannh/kubeconform/releases/latest --jq
+      # .tag_name` and bumping the tag below.
       # ----------------------------------------------------------------
       - name: kubeconform manifests
+        env:
+          KUBECONFORM_VERSION: v0.7.0
         run: |
-          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+          curl -sL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
             | tar xz kubeconform
           ./kubeconform -strict -ignore-missing-schemas \
             -schema-location default \
@@ -95,7 +102,17 @@ jobs:
       # h2dial/main.go only surfaces during `docker build` in deploy.sh.
       # Uses the committed go.mod + go.sum so CI's dependency tree is
       # content-hash-identical to local and Dockerfile builds.
+      #
+      # Go version matches the h2dial Dockerfile (golang:1.25-alpine) so
+      # CI catches anything that needs 1.25-specific behavior before the
+      # docker build does, and so the runner doesn't drift away from
+      # whatever local builds use.
       # ----------------------------------------------------------------
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32  # v5.0.2
+        with:
+          go-version: '1.25'
+          cache-dependency-path: h2dial/go.sum
       - name: Compile h2dial
         working-directory: h2dial
         run: |

@@ -37,3 +37,10 @@ if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}\s"; then
 else
     echo "Cluster '${CLUSTER_NAME}' does not exist; nothing to clean up."
 fi
+
+# Note: the locally-built `h2dial:local` and `ghz:local` Docker images
+# are intentionally left behind. They speed up the next ./deploy.sh
+# (deploy.sh checks `docker image inspect <tag>` and skips the build on
+# a hit). To force a rebuild after editing h2dial/main.go or
+# ghz-image/Dockerfile, `docker rmi h2dial:local` (or `ghz:local`)
+# before re-running deploy.sh.

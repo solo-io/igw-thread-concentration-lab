@@ -35,7 +35,7 @@ spec:
       - name: httpbin
         image: mccutchen/go-httpbin:v2.15.0
         command: ["/bin/go-httpbin"]
-        args: ["-port=8080", "-max-body-size=20971520"]  # 20 MB max body
+        args: ["-port=8080", "-max-body-size=20971520"]  # 20 MiB max body
         ports:
         - containerPort: 8080
           name: http

@@ -11,7 +11,10 @@
 #      every 5s during the measure window).
 #   5. Run the load gen twice (warmup + measure; per learning L003).
 #   6. Stop the CPU sampler.
-#   7. Capture the 9 core metrics + concentration ratio per pod.
+#   7. Capture per-pod and per-worker metrics into <out>/*_per_pod.txt
+#      and <out>/cv.txt (downstream_cx_*, GOAWAY counters, flow-control
+#      pauses, upstream pending/overflow, bytes buffered, plus the
+#      listener-level latency histogram blob).
 #   8. Capture per-thread CPU snapshots from each IGW pod.
 #   9. Render the Grafana dashboard for this measure window via the
 #      render API and save the PNG (handled in the second pass once the
@@ -42,7 +45,9 @@ cleanup_on_exit() {
     fi
     local pids
     pids="$(jobs -pr 2>/dev/null || true)"
-    [[ -n "${pids}" ]] && kill ${pids} 2>/dev/null || true
+    # shellcheck disable=SC2086 # word-splitting is intentional: pids is a
+    # whitespace-separated list of numeric PIDs from `jobs -pr`.
+    [[ -n "${pids}" ]] && kill -- ${pids} 2>/dev/null || true
 }
 trap cleanup_on_exit EXIT INT TERM
 
@@ -144,27 +149,6 @@ all_waypoint_pods() {
     kctl get pod -n "${NAMESPACE_APP}" -l gateway.istio.io/managed=istio.io-mesh-controller -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
 }
 
-# CV across waypoint pods on a stat. Uses the inbound listener prefix
-# the waypoint is configured with (HBONE on port 15008 wrapping HTTP/2).
-cv_across_waypoints() {
-    local stat="$1"
-    local lines=""
-    for pod in $(all_waypoint_pods); do
-        local val
-        val="$(kctl exec -n "${NAMESPACE_APP}" "${pod}" -- pilot-agent request GET stats 2>/dev/null | awk -v s="${stat}: " 'index($0, s) == 1 {print $NF; exit}')"
-        lines="${lines}${pod} ${val:-0}"$'\n'
-    done
-    printf '%b' "${lines}" | awk '
-    { n++; sum += $2; sumsq += $2 * $2 }
-    END {
-        if (n == 0 || sum == 0) { print "0"; exit }
-        mean = sum / n
-        var = (sumsq / n) - (mean * mean)
-        if (var < 0) var = 0
-        printf "%.3f\n", sqrt(var) / mean
-    }'
-}
-
 reset_stats() {
     for pod in $(all_igw_pods); do
         kctl exec -n "${NAMESPACE_ISTIO}" "${pod}" -- pilot-agent request POST reset_counters "" >/dev/null 2>&1 || true
@@ -204,50 +188,52 @@ cv_across_pods() {
     }'
 }
 
-# Capture the 9 core metrics + concentration ratio + listener latency
-# histogram. Output in <out>/<metric>_per_pod.txt.
+# Capture per-pod metrics into <out>/<metric>_per_pod.txt plus the
+# listener latency histogram blob and per-pod worker CV.
 capture_metrics() {
     local out="$1"
-    # 1. Active connections per pod (gauge, valid only mid-run, but we
+    # Active connections per pod (gauge, valid only mid-run, but we
     # snapshot post-run for completeness; for analytics we use the _total
-    # counter below)
+    # counter below).
     stat_per_pod "${LISTENER_PREFIX}.downstream_cx_active" \
         > "${out}/cx_active_per_pod.txt" 2>/dev/null || true
     # HTTP/2 connections opened total (counter, primary distribution metric)
     stat_per_pod "${LISTENER_PREFIX}.downstream_cx_http2_total" \
         > "${out}/cx_http2_total_per_pod.txt" 2>/dev/null || true
-    # 2. Active requests per pod (for concentration ratio with cx_active)
+    # Active requests per pod. Combined with cx_active, gives the
+    # per-connection multiplexing depth used as a back-of-envelope
+    # concentration ratio in the README metric reference.
     stat_per_pod "${LISTENER_PREFIX}.downstream_rq_active" \
         > "${out}/rq_active_per_pod.txt" 2>/dev/null || true
-    # 3. GOAWAY counters (max_duration / max_requests_reached)
+    # GOAWAY counters (max_duration / max_requests_reached)
     stat_per_pod "${LISTENER_PREFIX}.downstream_cx_max_duration_reached" \
         > "${out}/cx_max_duration_reached.txt" 2>/dev/null || true
     stat_per_pod "${LISTENER_PREFIX}.downstream_cx_max_requests_reached" \
         > "${out}/cx_max_requests_reached.txt" 2>/dev/null || true
-    # 4. Upstream pending requests (saturation upstream)
+    # Upstream pending requests (saturation upstream)
     stat_per_pod "${CLUSTER_PREFIX}.upstream_rq_pending_active" \
         > "${out}/upstream_rq_pending_active.txt" 2>/dev/null || true
     stat_per_pod "${CLUSTER_PREFIX}.upstream_rq_pending_overflow" \
         > "${out}/upstream_rq_pending_overflow.txt" 2>/dev/null || true
-    # 5. Upstream connection pool overflow
+    # Upstream connection pool overflow
     stat_per_pod "${CLUSTER_PREFIX}.upstream_cx_overflow" \
         > "${out}/upstream_cx_overflow.txt" 2>/dev/null || true
-    # 6. Stream / connection idle timeouts
+    # Stream / connection idle timeouts
     stat_per_pod "${LISTENER_PREFIX}.downstream_rq_idle_timeout" \
         > "${out}/downstream_rq_idle_timeout.txt" 2>/dev/null || true
     stat_per_pod "${LISTENER_PREFIX}.downstream_cx_idle_timeout" \
         > "${out}/downstream_cx_idle_timeout.txt" 2>/dev/null || true
-    # 7. Listener-level tail latency histogram (P0..P100). Written as a
+    # Listener-level tail latency histogram (P0..P100). Written as a
     # multiline blob since values are histograms not scalars.
     for pod in $(all_igw_pods); do
         local hist
         hist="$(admin "${pod}" stats 2>/dev/null | awk -v s="${LISTENER_RAW}.downstream_cx_length_ms: " 'index($0, s) == 1 {print; exit}')"
         echo "${pod} ${hist}"
     done > "${out}/cx_length_ms_per_pod.txt" 2>/dev/null || true
-    # 8. Flow-control pause counters
+    # Flow-control pause counters
     stat_per_pod "${CLUSTER_PREFIX}.upstream_flow_control_paused_reading_total" \
         > "${out}/flow_control_paused.txt" 2>/dev/null || true
-    # 9. Bytes buffered (RX/TX) on the upstream cluster
+    # Bytes buffered (RX/TX) on the upstream cluster
     stat_per_pod "${CLUSTER_PREFIX}.upstream_cx_rx_bytes_buffered" \
         > "${out}/upstream_cx_rx_bytes_buffered.txt" 2>/dev/null || true
     stat_per_pod "${CLUSTER_PREFIX}.upstream_cx_tx_bytes_buffered" \
@@ -375,10 +361,21 @@ stop_metric_sampler() {
     sleep 1
 }
 
-# Extract p99 from h2dial or fortio output.
+# Extract p99 from h2dial or fortio output. Returns "n/a" when the
+# expected `# target 99% <value>` line is absent (the load gen errored,
+# or the file is empty). `head -1` exits 0 on empty input, so the
+# previous `|| echo n/a` form never fired -- callers got an empty
+# string that downstream awk parsed as 0 and that quietly poisoned the
+# H-D evaluation.
 extract_p99() {
     local file="$1"
-    grep -E '^# target 99% ' "${file}" 2>/dev/null | awk '{print $4}' | head -1 || echo "n/a"
+    local val
+    val="$(grep -E '^# target 99% ' "${file}" 2>/dev/null | awk '{print $4; exit}')"
+    if [[ -z "${val}" ]]; then
+        echo "n/a"
+    else
+        echo "${val}"
+    fi
 }
 
 # capture_grafana_screenshot: render the lab dashboard for the time
@@ -789,7 +786,10 @@ if [[ -f "${ENVOYFILTERS}/scenario13-conn-balance.yaml" ]] && should_run "13-con
         # (baseline filter, no listener overrides) and 13-conn-balance
         # (ExactBalance) regardless of --only because they're a measurement
         # pair: the control is meaningless without the scenario, and vice
-        # versa.
+        # versa. The unset+restore around the two run_h2dial_scenario
+        # calls is the load-bearing piece: clearing ONLY makes
+        # should_run() return 0 for any name; restoring it afterwards
+        # keeps any later top-level scenario filtering intact.
         saved_only="${ONLY}"
         ONLY=""
         # Control: same load profile, baseline filter, kernel-driven accept.

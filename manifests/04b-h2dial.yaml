@@ -1,7 +1,8 @@
 # h2dial: a custom Go HTTP/2 client that exercises Go's http2.Transport
-# connection-pool dial-on-cap behavior. Used by run-tests.sh scenarios 2b
-# and 3b to demonstrate the "smart client" half of H-B (the dialing-client
-# response to GOAWAY, in contrast to fortio's queue-on-cap behavior).
+# connection-pool dial-on-cap behavior. Used by every h2dial-driven
+# scenario; the "smart client" half of H-B (the dialing-client response
+# to GOAWAY, in contrast to fortio's queue-on-cap behavior) is
+# specifically scenario 03-mcs-cap paired with 03-fortio.
 #
 # See h2dial/main.go for the source and rationale.
 #

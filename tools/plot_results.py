@@ -187,14 +187,16 @@ def plot_he_timeseries(results: Path) -> None:
     t0 = int(rows[0]["timestamp"])
     secs = [int(r["timestamp"]) - t0 for r in rows]
     cv = [float(r["cv"]) for r in rows]
+    p95 = [float(r["upstream_p95"]) for r in rows]
     p99 = [float(r["upstream_p99"]) for r in rows]
     fig, ax1 = plt.subplots(figsize=(10, 5))
     ax2 = ax1.twinx()
     ax1.plot(secs, cv, "o-", color="#1f77b4", label="CV across pods")
+    ax2.plot(secs, p95, "^:",  color="#ff9f43", label="upstream p95 (ms)")
     ax2.plot(secs, p99, "s--", color="#d62728", label="upstream p99 (ms)")
     ax1.set_xlabel("seconds since measure window start")
     ax1.set_ylabel("CV (stddev/mean)", color="#1f77b4")
-    ax2.set_ylabel("upstream p99 latency (ms)", color="#d62728")
+    ax2.set_ylabel("upstream latency (ms)", color="#d62728")
     ax1.set_title(
         "CV-as-leading-indicator (scenario 02-trigger)\n"
         "Claim: CV rises BEFORE p99 jumps. Inspect crossover timing."
@@ -240,7 +242,7 @@ def main() -> int:
         print(f"not a directory: {results}", file=sys.stderr)
         return 1
     (results / "plots").mkdir(exist_ok=True)
-    scenario_dirs = sorted(p for p in results.iterdir() if p.is_dir() and re.match(r"\d{2}", p.name))
+    scenario_dirs = sorted(p for p in results.iterdir() if p.is_dir() and re.match(r"^\d{2}", p.name))
     if not scenario_dirs:
         print(f"no scenario dirs in {results}", file=sys.stderr)
         return 1

@@ -220,19 +220,24 @@ if [[ -z "${CONCURRENCY_VAL}" ]]; then
     echo "             Scenario 13 (within-pod worker balance) may be misleading."
 elif [[ "${CONCURRENCY_VAL}" -ne "${IGW_CPU}" ]]; then
     echo "    WARNING: Envoy concurrency=${CONCURRENCY_VAL} does NOT match IGW_CPU=${IGW_CPU}."
-    echo "             The meshConfig pin did not take effect. Scenario 13 results"
-    echo "             will reflect concurrency=${CONCURRENCY_VAL}, not the requested IGW_CPU."
+    echo "             Most common cause: IGW_CPU was changed in config.env after the"
+    echo "             initial deploy. istioctl install is short-circuited when istiod"
+    echo "             already exists, so the meshConfig pin (and IGW CPU request/limit)"
+    echo "             still reflect the previous value. Scenario 13 will run at the"
+    echo "             OLD concurrency=${CONCURRENCY_VAL}, not the requested IGW_CPU=${IGW_CPU}."
+    echo "             To fix: ./cleanup.sh && ./deploy.sh"
     echo "             To debug: ${ISTIOCTL} pc bootstrap ${IGW_POD} -n ${NAMESPACE_ISTIO} | grep concurrency"
 else
     echo "    OK: concurrency=${CONCURRENCY_VAL} (matches IGW_CPU)"
 fi
 
-# --- Install Gateway API CRDs (required for the waypoint resource) ---------
+# --- Step 4: Install Gateway API CRDs (required for the waypoint resource) -
 # The waypoint in 06-waypoint.yaml uses gateway.networking.k8s.io/v1 which
 # is NOT installed by default on most clusters (including k3d) and is NOT
 # installed by `istioctl install --set profile=ambient`. Without these,
 # applying the waypoint manifest fails with "no matches for kind Gateway
 # in version gateway.networking.k8s.io/v1".
+echo "[4/9] Ensuring Gateway API CRDs..."
 if kubectl --context "${CONTEXT}" get crd gateways.gateway.networking.k8s.io &>/dev/null; then
     echo "  Gateway API CRDs already installed"
 else
@@ -258,7 +263,11 @@ sed "s|\${FORTIO_IMAGE}|${FORTIO_IMAGE}|g" "${MANIFESTS}/04-loadgen.yaml" \
 kubectl --context "${CONTEXT}" rollout status deployment/fortio -n "${NAMESPACE_LOAD}" --timeout=120s >/dev/null
 
 # h2dial: custom Go HTTP/2 client with shared-transport pool semantics.
-# Used by scenarios 2b and 3b for the H-B "smart client" validation.
+# Used by every h2dial-driven scenario (01-baseline, 02-trigger,
+# 03-mcs-cap, 04-mrpc, 05-windows, 06/07-waypoint-*, 08-buffers,
+# 09-hol-blocking, 10-rotation, 11-realistic-filters, 13-conn-balance);
+# the H-B "smart client" half is specifically 03-mcs-cap, paired with
+# the fortio "queueing client" run 03-fortio.
 # Build the image locally and import into k3d (no registry round-trip).
 H2DIAL_IMAGE="h2dial:local"
 if docker image inspect "${H2DIAL_IMAGE}" &>/dev/null; then
@@ -273,6 +282,10 @@ echo "  Importing h2dial image into k3d cluster..."
 k3d image import "${H2DIAL_IMAGE}" --cluster "${CLUSTER_NAME}" 2>&1 | tail -2
 
 # ghz: build locally + import to k3d (no public image works for our needs).
+# --platform=linux/amd64 is required: ghz only ships an x86_64 Linux
+# binary, so on Apple Silicon hosts the image must be built (and later
+# run) under Rosetta. h2dial above does not need --platform because Go
+# cross-compiles natively to whichever architecture Docker chose.
 GHZ_IMAGE="ghz:local"
 if docker image inspect "${GHZ_IMAGE}" &>/dev/null; then
     echo "  ghz image already built locally"

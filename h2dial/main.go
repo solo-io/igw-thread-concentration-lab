@@ -98,6 +98,18 @@ func main() {
 	var latMu sync.Mutex
 	latencies := make([]time.Duration, 0, 1<<20)
 
+	// Parse -header once. Applied to every outbound request (primary and
+	// slow-URL workers alike); the parsing used to live inside the
+	// primary worker's per-request loop, which both re-parsed on every
+	// request and silently skipped the slow workers.
+	var hdrKey, hdrVal string
+	if *headerFlag != "" {
+		if i := strings.Index(*headerFlag, ":"); i > 0 {
+			hdrKey = strings.TrimSpace((*headerFlag)[:i])
+			hdrVal = strings.TrimSpace((*headerFlag)[i+1:])
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), *duration)
 	defer cancel()
 
@@ -120,10 +132,8 @@ func main() {
 					atomic.AddInt64(&errs, 1)
 					continue
 				}
-				if *headerFlag != "" {
-					if i := strings.Index(*headerFlag, ":"); i > 0 {
-						req.Header.Set(strings.TrimSpace((*headerFlag)[:i]), strings.TrimSpace((*headerFlag)[i+1:]))
-					}
+				if hdrKey != "" {
+					req.Header.Set(hdrKey, hdrVal)
 				}
 				resp, err := c.Do(req)
 				if err != nil {
@@ -155,6 +165,9 @@ func main() {
 					req, err := http.NewRequestWithContext(ctx, "GET", *slowURL, nil)
 					if err != nil {
 						continue
+					}
+					if hdrKey != "" {
+						req.Header.Set(hdrKey, hdrVal)
 					}
 					resp, err := c.Do(req)
 					if err != nil {

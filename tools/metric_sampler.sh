@@ -14,6 +14,10 @@
 # Args mirror cpu_sampler.sh:
 #   $1 CONTEXT, $2 NAMESPACE_ISTIO, $3 OUT_FILE, $4 SENTINEL_PATH, $5 INTERVAL
 
+# Deliberately omit `-e`: a transient kubectl error on one sample
+# (network blip, pod transition) should NOT terminate the sampler. The
+# main loop will retry on the next tick. The parent run-tests.sh removes
+# the sentinel file when it wants this loop to exit cleanly.
 set -uo pipefail
 
 CONTEXT="$1"
