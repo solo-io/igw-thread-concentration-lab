@@ -4,7 +4,7 @@
 
 A self-contained k3d lab that reproduces, measures, and lets you tune **Istio Ingress Gateway thread concentration under low client connection cardinality**: the production failure mode where aggregate gateway CPU looks fine but a small number of worker threads saturate, driving tail latency.
 
-The lab installs upstream OSS Istio (1.27.x). The mechanism under test (HTTP/2 stream-to-worker pinning, plus the four canonical lever knobs and the within-pod balance lever) lives in upstream Envoy, so the findings carry directly to Solo Enterprise builds without re-running. If you want to use Solo Enterprise images, override the `hub` flag passed to `istioctl install` in `deploy.sh`; nothing else needs to change.
+The lab installs upstream OSS Istio (1.27.x). The mechanism under test (HTTP/2 stream-to-worker pinning, plus the four canonical lever knobs and the within-pod balance lever) lives in upstream Envoy, so the findings carry directly to Solo Enterprise builds without re-running. Running the lab against Solo Enterprise images is possible but out of scope here: it requires an enterprise `istioctl`, a license key, and the corresponding installation flags. Refer to the Solo Enterprise documentation for that path.
 
 The lab is built around four hypotheses about the mechanism and the levers that move it, plus a fifth orthogonal hypothesis (H-E) about within-pod worker balance via Envoy's `connection_balance_config`. Running it, reading the dashboards, and reading the per-scenario output should leave you with a working mental model of:
 
@@ -76,7 +76,7 @@ The practical consequence: a server-side `max_concurrent_streams` reduction only
 Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 architecture.d2 architecture.png`.
 
 - **k3d cluster** `igw-tc-lab` (1 server + 2 agents) with Traefik disabled.
-- **Upstream Istio 1.27.8**, ambient profile. `istio-cni` configured with k3s-specific CNI directory overrides (k3s does not use the standard `/etc/cni/net.d` and `/opt/cni/bin` paths). The `istioctl` binary is downloaded from the upstream `github.com/istio/istio` releases. To swap in Solo Enterprise images, override the `hub` and tag passed to `istioctl install` in `deploy.sh`; the scenarios and dashboards are unchanged.
+- **Upstream Istio 1.27.8**, ambient profile. `istio-cni` configured with k3s-specific CNI directory overrides (k3s does not use the standard `/etc/cni/net.d` and `/opt/cni/bin` paths). The `istioctl` binary is downloaded from the upstream `github.com/istio/istio` releases. Solo Enterprise is a separate installation path (enterprise `istioctl`, license key, different install flags) and is out of scope for this lab; the scenarios and dashboards would still apply because the mechanism is in upstream Envoy.
 - **Standard `istio-ingressgateway`** at the edge: 6 replicas, 1 worker thread each. The HPA is deleted on deploy so low-CPU scenarios cannot scale it back to 1. The IGW pod template is patched with a `proxyStatsMatcher` annotation so Envoy emits the connection-, listener-, and flow-control-level stats the dashboard depends on (which Istio's default matcher excludes).
 - **`mccutchen/go-httpbin`** backend in `igw-test` namespace (ambient). Endpoints used: `/get` (default), `/bytes/N` (deterministic payloads, used in scenarios 5 and 8), `/delay/N` (slow-stream HOL test, scenario 9).
 - **Two load generators** in `loadgen` namespace, intentionally NOT in ambient (we are testing client HTTP/2 connection-pool behavior; we do not want a transparent proxy in the path):
