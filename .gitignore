@@ -1,6 +1,7 @@
 # Claude
 CLAUDE.md
 .claude/
+session.sh
 
 # Test run outputs
 results/
