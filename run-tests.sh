@@ -545,8 +545,11 @@ run_fortio_scenario() {
 # --- Scenarios --------------------------------------------------------------
 
 # Scenario 1: low-CV reference baseline.
-# h2dial -mode=distinct gives one TCP connection per worker = 100 connections
-# distributed evenly across 3 IGW pods = low CV.
+# h2dial -mode=distinct gives one TCP connection per worker; with -c=100
+# the runner opens 100 connections, hashed across however many IGW pods
+# are running (default IGW_REPLICAS=6). The expected CV is the binomial-
+# variance floor (~0.22 at 6 pods, ~0.14 at 3 pods); see PLAN.md "Why
+# baseline CV is not zero" for the math.
 run_h2dial_scenario "01-baseline" \
     "${ENVOYFILTERS}/scenario1-baseline.yaml" \
     "${IGW_URL}/get" 100 distinct
@@ -675,12 +678,20 @@ if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "1
     # AuthorizationPolicy), so the JWT filter runs and incurs cost but
     # does not reject requests.
     echo ""
-    echo "  Applying RequestAuthentication for JWT validation..."
-    kctl apply -f "${MANIFESTS}/11-jwt-auth.yaml" >/dev/null
-    sleep 5
-    DEMO_JWT="$(curl -fsSL https://raw.githubusercontent.com/istio/istio/release-1.27/security/tools/jwt/samples/demo.jwt 2>/dev/null | tr -d '\n')"
+    # Fetch the JWT BEFORE applying RequestAuthentication, so an offline
+    # host falls through to "access-log-only" cleanly rather than applying
+    # an auth policy and then silently sending requests with no token
+    # (which would change the filter chain but not the measurement).
+    # `|| true` on the curl substitution is load-bearing on bash 3.2: a
+    # failed `curl -f` under `set -o pipefail` aborts the script before
+    # the empty-string guard below can run.
+    DEMO_JWT="$(curl -fsSL https://raw.githubusercontent.com/istio/istio/release-1.27/security/tools/jwt/samples/demo.jwt 2>/dev/null | tr -d '\n' || true)"
     if [[ -z "${DEMO_JWT}" ]]; then
-        echo "  WARNING: could not fetch Istio demo JWT; scenario 11 will run without Authorization header."
+        echo "  Could not fetch Istio demo JWT; scenario 11 will run WITHOUT JWT validation (access-log filter only)."
+    else
+        echo "  Applying RequestAuthentication for JWT validation..."
+        kctl apply -f "${MANIFESTS}/11-jwt-auth.yaml" >/dev/null
+        sleep 5
     fi
 
     out_dir="${RESULTS_DIR}/11-realistic-filters"
@@ -720,8 +731,10 @@ if [[ -f "${ENVOYFILTERS}/scenario11-realistic-filters.yaml" ]] && should_run "1
     p99_11="$(extract_p99 "${out_dir}/h2dial-measure.txt")"
     echo "  p99 latency = ${p99_11}s" | tee -a "${out_dir}/cv.txt"
 
-    echo "  Removing RequestAuthentication..."
-    kctl delete -f "${MANIFESTS}/11-jwt-auth.yaml" --ignore-not-found >/dev/null 2>&1 || true
+    if [[ -n "${DEMO_JWT}" ]]; then
+        echo "  Removing RequestAuthentication..."
+        kctl delete -f "${MANIFESTS}/11-jwt-auth.yaml" --ignore-not-found >/dev/null 2>&1 || true
+    fi
 fi
 
 # gRPC variant via ghz + grpcbin. Single grpc.ClientConn (--connections 1)
@@ -778,10 +791,14 @@ fi
 # is nothing to balance within a single-thread pod. To exercise: set
 # IGW_CPU=2+ in config.env, redeploy, then re-run.
 if [[ -f "${ENVOYFILTERS}/scenario13-conn-balance.yaml" ]] && should_run "13-conn-balance"; then
-    igw_pod_for_check="$(all_igw_pods | head -1)"
+    # `|| true` on both substitutions guards against the bash 3.2
+    # set -e + pipefail trap: an empty IGW deployment or a transient
+    # pilot-agent error would otherwise kill the script before the
+    # empty-string guard below can fall through to the SKIPPED branch.
+    igw_pod_for_check="$(all_igw_pods | head -1 || true)"
     concurrency_check="$(kctl exec -n "${NAMESPACE_ISTIO}" "${igw_pod_for_check}" \
         -- pilot-agent request GET server_info 2>/dev/null \
-        | grep -oE '"concurrency": *[0-9]+' | head -1 | grep -oE '[0-9]+')"
+        | grep -oE '"concurrency": *[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
     if [[ -z "${concurrency_check}" || "${concurrency_check}" -lt 2 ]]; then
         echo ""
         echo "================================================================"

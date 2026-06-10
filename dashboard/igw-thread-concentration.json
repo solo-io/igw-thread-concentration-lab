@@ -23,7 +23,7 @@
         "y": 0
       },
       "id": 1,
-      "description": "stddev/avg of active connections across pods. Rises BEFORE p99 latency rises -- a leading indicator of thread concentration.",
+      "description": "stddev/avg of active connections across pods. Rises BEFORE p99 latency rises; a leading indicator of thread concentration.",
       "targets": [
         {
           "expr": "stddev(envoy_http_downstream_cx_active{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"}) / avg(envoy_http_downstream_cx_active{http_conn_manager_prefix=\"outbound_0.0.0.0_8080\", pod=~\"istio-ingressgateway-.*\"})",

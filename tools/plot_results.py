@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""plot_results.py -- generate comparison plots from a results/<timestamp>/ run.
+"""plot_results.py: generate comparison plots from a results/<timestamp>/ run.
 
 Reads per-scenario stat files and produces 6 PNGs in <results-dir>/plots/:
-  cv_across_scenarios.png       -- horizontal bar chart of CV across all scenarios
-  per_pod_connections.png       -- grouped bar chart, fortio vs h2dial 02/03
-  p99_comparison.png            -- p99 latency across scenarios
-  goaway_rate.png               -- counter values (max_duration_reached, max_requests_reached) by scenario
-  he_timeseries.png             -- CV vs upstream p95/p99 time series for scenario 02
-  filter_chain_overhead.png     -- p99 comparison between scenario 2 and 11
+  cv_across_scenarios.png       horizontal bar chart of CV across all scenarios
+  per_pod_connections.png       grouped bar chart, fortio vs h2dial 02/03
+  p99_comparison.png            p99 latency across scenarios (split by client)
+  goaway_rate.png               counter values (max_duration_reached, max_requests_reached) by scenario
+  he_timeseries.png             CV vs upstream p95/p99 time series for scenario 02
+  filter_chain_overhead.png     p99 comparison between scenario 2 and 11
 
 Usage:
     plot_results.py <results-dir>
@@ -15,7 +15,6 @@ Usage:
 from __future__ import annotations
 
 import csv
-import os
 import re
 import sys
 from pathlib import Path

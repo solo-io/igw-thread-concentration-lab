@@ -87,7 +87,7 @@ Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 arch
 
 ## Prerequisites
 
-- **k3d** 5.x (tested with 5.8.3)
+- **k3d** 5.9.x (tested with 5.9.0; older k3d uses a different k3s CNI bin-dir path and may need a `deploy.sh` adjustment, see `config.env.example` for the pin)
 - **Docker** running
 - **kubectl**, **helm** 3.x or 4.x, **bash**, **awk**, **curl**
 - **Python 3** with **matplotlib** for the comparison plots: `pip3 install --user matplotlib` (on Python 3.12+, PEP 668 may require `pip3 install --user --break-system-packages matplotlib`; or use a venv)
@@ -336,7 +336,7 @@ The build phase surfaced these gotchas. They are now handled by the scripts, but
 - **`grafana-image-renderer` is amd64-only**. We avoid the in-process Grafana plugin (which is statically linked against Grafana's architecture and breaks the arm64 Grafana container) and instead deploy it as a separate sidecar pod, pulled with `--platform=linux/amd64` and imported into k3d. On Apple Silicon hosts the sidecar runs under Rosetta; on amd64 hosts it runs natively. If the sidecar fails to start, `run-tests.sh` falls back to printing a manual screenshot URL.
 - **h2dial `-idle` mode**. `select {}` triggers Go's deadlock detector when no other goroutines exist. Use `for { time.Sleep(time.Hour) }` instead.
 - **k3d Traefik must be disabled**. Default k3d ships with Traefik, which conflicts with the IGW for port 80. The cluster-create command in `deploy.sh` includes `--k3s-arg "--disable=traefik@server:0"`.
-- **Istio CNI on k3d** uses non-standard CNI directories (`/var/lib/rancher/k3s/agent/etc/cni/net.d` and `/bin`, not the upstream defaults). The `helm install istio-cni` command in `deploy.sh` sets these explicitly.
+- **Istio CNI on k3d** uses non-standard CNI directories (`/var/lib/rancher/k3s/agent/etc/cni/net.d` for config; `/var/lib/rancher/k3s/data/cni` for binaries on k3d 5.9+, was `/bin` on older k3d). `deploy.sh` sets both via the istioctl install. If you bump k3d and pods stick in `ContainerCreating` with a "failed to find plugin 'istio-cni' in path [<dir>]" error, that's the new bin-dir kubelet is searching; update `cniBinDir` in `deploy.sh` and the pin in `config.env.example`.
 
 ## Cleanup
 

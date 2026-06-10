@@ -215,8 +215,14 @@ fi
 # value mostly harms scenario 13's signal rather than the whole lab.
 echo "  Verifying Envoy concurrency on a gateway pod:"
 IGW_POD="$(kubectl --context "${CONTEXT}" get pod -n "${NAMESPACE_ISTIO}" -l app=istio-ingressgateway -o jsonpath='{.items[0].metadata.name}')"
-CONCURRENCY_RAW="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${IGW_POD}" -- pilot-agent request GET server_info 2>/dev/null | grep -oE '"concurrency": *[0-9]+' | head -1)"
-CONCURRENCY_VAL="$(echo "${CONCURRENCY_RAW}" | grep -oE '[0-9]+' | head -1)"
+# `|| true` on both substitutions is load-bearing on macOS-shipped bash
+# 3.2: if pilot-agent errors or grep finds nothing, the pipeline exits
+# non-zero under set -o pipefail, and bash 3.2 propagates that out of
+# the command sub and kills the script before the WARNING handler below
+# (which was designed for exactly this case) can run. Bash 4+ does not
+# have this behavior.
+CONCURRENCY_RAW="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_ISTIO}" "${IGW_POD}" -- pilot-agent request GET server_info 2>/dev/null | grep -oE '"concurrency": *[0-9]+' | head -1 || true)"
+CONCURRENCY_VAL="$(echo "${CONCURRENCY_RAW}" | grep -oE '[0-9]+' | head -1 || true)"
 echo "    pod: ${IGW_POD}"
 if [[ -z "${CONCURRENCY_VAL}" ]]; then
     echo "    WARNING: could not read Envoy concurrency from server_info."
@@ -305,7 +311,7 @@ kubectl --context "${CONTEXT}" rollout status deployment/h2dial -n "${NAMESPACE_
 # ghz: gRPC load tester for scenario 12. Models real-world single
 # ClientConn behavior with --connections 1.
 echo "  Applying ghz gRPC load tester..."
-kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/13-ghz.yaml" >/dev/null
+kubectl --context "${CONTEXT}" apply -f "${MANIFESTS}/12-ghz.yaml" >/dev/null
 kubectl --context "${CONTEXT}" rollout status deployment/ghz -n "${NAMESPACE_LOAD}" --timeout=120s >/dev/null
 
 # grpcbin: gRPC backend for scenario 12. Two replicas (ambient mode);

@@ -145,7 +145,7 @@ A transversal check, run during the ramp of scenario 2: confirm the CV-of-`downs
 - **Backend:** `mccutchen/go-httpbin`, in-cluster, ambient.
 - **Metrics:** kube-prometheus-stack via Helm (Prometheus + Grafana + PodMonitors). Scraped from `istio-proxy` port 15090 on the IGW and waypoint pods, and from the ztunnel daemonset.
 - **EnvoyFilters:** one manifest per scenario in `manifests/envoyfilters/`, applied between scenarios.
-- **Per-thread CPU snapshots:** `top -H -b -n 1 -p $(pgrep envoy)` captured inside the gateway pod at the peak of each scenario; written to `results/<ts>/<scenario>/`.
+- **Per-thread / per-worker sampler:** `tools/cpu_sampler.sh` runs every 5s during the measure window, capturing per-pod CPU via `kubectl top pod` and per-worker accept counters via Envoy admin (`listener.0.0.0.0_8080.worker_N.downstream_cx_*`). The original plan was `top -H -b -n 1 -p $(pgrep envoy)` inside the pod, but the istio-proxy image is distroless and ships without `sh`, `top`, or `pgrep`; the Envoy admin route is a more direct measurement of the same thing (`connection_balance_config` operates on the same counters).
 - **Time-series sampler:** every 5 seconds during a scenario, dumps the gauge values for `cx_active`, `rq_active`, and the histogram p99 to a CSV for offline plotting.
 
 ## Why baseline CV is not zero (theoretical floor)
