@@ -90,7 +90,7 @@ Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 arch
 - **k3d** 5.x (tested with 5.8.3)
 - **Docker** running
 - **kubectl**, **helm** 3.x or 4.x, **bash**, **awk**, **curl**
-- **Python 3** with **matplotlib** for the comparison plots: `pip3 install --user matplotlib`
+- **Python 3** with **matplotlib** for the comparison plots: `pip3 install --user matplotlib` (on Python 3.12+, PEP 668 may require `pip3 install --user --break-system-packages matplotlib`; or use a venv)
 - Internet access (for `istioctl 1.27.8`, the Gateway API CRDs, container images)
 
 The lab runs on Apple Silicon and Linux. On Apple Silicon two components run under Rosetta amd64 emulation: `ghz` (the gRPC load tester; it ships only an amd64 Linux binary) and the Grafana image-renderer (deployed as a sidecar container so screenshots work on arm64 hosts). Both are pulled with `--platform=linux/amd64` and side-loaded into the k3d cluster via `k3d image import` by `deploy.sh`.

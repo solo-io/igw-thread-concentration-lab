@@ -135,22 +135,42 @@ def plot_per_pod_connections(results: Path) -> None:
 
 
 def plot_p99_comparison(results: Path, scenarios: list[Path]) -> None:
-    names: list[str] = []
-    p99s: list[float] = []
+    # h2dial drives 500 goroutines through a shared transport; fortio drives
+    # `-c 2` in-flight requests through a fixed pool. The two clients run at
+    # very different concurrency depths, so their p99 numbers are not
+    # comparable on the same axis (a single chart implies "fortio wins"
+    # when really it's lighter load). Split into two subplots: same axis
+    # scale within each client, no cross-client visual comparison.
+    h2d: list[tuple[str, float]] = []
+    fts: list[tuple[str, float]] = []
     for d in scenarios:
         _, p99 = read_cv_p99(d)
-        if p99 > 0:
-            names.append(d.name)
-            p99s.append(p99 * 1000)  # to ms
-    if not names:
+        if p99 <= 0:
+            continue
+        entry = (d.name, p99 * 1000)
+        (fts if "fortio" in d.name else h2d).append(entry)
+    if not h2d and not fts:
         print("  skipping p99_comparison: no p99 values parsed")
         return
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.5 * len(names))))
-    colors = ["#fb6f6f" if "fortio" in n else "#d62728" for n in names]
-    ax.barh(names, p99s, color=colors)
-    ax.set_xlabel("p99 latency (ms)")
-    ax.set_title("p99 latency by scenario (lower is better)")
-    ax.invert_yaxis()
+    fig, axes = plt.subplots(
+        2, 1,
+        figsize=(10, max(6, 0.5 * (len(h2d) + len(fts)) + 2)),
+        gridspec_kw={"height_ratios": [max(1, len(h2d)), max(1, len(fts))]},
+    )
+    for ax, group, label, color in (
+        (axes[0], h2d, "h2dial (-c 500 goroutines, shared transport)", "#d62728"),
+        (axes[1], fts, "fortio (-c 2 in-flight, fixed pool)", "#fb6f6f"),
+    ):
+        if not group:
+            ax.text(0.5, 0.5, f"no {label} scenarios captured", ha="center", va="center", transform=ax.transAxes)
+            ax.set_axis_off()
+            continue
+        names, p99s = zip(*group)
+        ax.barh(names, p99s, color=color)
+        ax.set_xlabel("p99 latency (ms)")
+        ax.set_title(label)
+        ax.invert_yaxis()
+    fig.suptitle("p99 latency by scenario (lower is better, within each client)")
     plt.tight_layout()
     out = results / "plots" / "p99_comparison.png"
     plt.savefig(out, dpi=120)
