@@ -8,7 +8,7 @@ This lab grows by accumulating well-isolated scenarios that teach one thing each
 - **State the hypothesis before adding the scenario.** Update `PLAN.md` first with what you expect to see, what would confirm it, and what would refute it. Refutations are a feature, not a failure: a hypothesis that doesn't hold is itself a finding.
 - **Add the scenario to `run-tests.sh`.** Follow the pattern of existing scenarios: apply the EnvoyFilter, run the load gen, capture stats, write to `results/<ts>/<scenario>/`.
 - **Update the README's scenario table** with a "What it teaches" and "What to watch" entry. The reader should know why your scenario exists without reading the manifests.
-- **Don't include customer- or organization-specific content.** This repo is internal-first with the possibility of going public; sanitize as you write.
+- **Don't include customer- or organization-specific content.** This repo is public. No customer names, ticket IDs (Zendesk, JIRA, Linear), internal Slack URLs, real cluster IDs, ARNs, project IDs, or proprietary configuration. Sanitize as you write rather than as you push. The `.github/PULL_REQUEST_TEMPLATE.md` checklist enforces this on review.
 
 ## Adding a scenario
 
