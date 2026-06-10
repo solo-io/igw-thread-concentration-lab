@@ -26,14 +26,22 @@ import matplotlib.pyplot as plt
 
 
 def read_cv_p99(scen_dir: Path) -> tuple[float, float]:
-    """Read CV and p99 from <scen>/cv.txt."""
+    """Read CV and p99 from <scen>/cv.txt.
+
+    cv.txt has four CV lines (across-pods cx_http2_total, across-pods
+    active gauge, within-pod worker mean, within-pod worker max). The
+    cross-pod cx_http2_total CV is the headline H-A signal and the only
+    one this plot wants; pinning the regex prevents a loose `CV.*` from
+    overwriting it with later lines (worker CVs are zero at the
+    default concurrency=1 and would make every bar zero).
+    """
     cv = 0.0
     p99 = 0.0
     cv_file = scen_dir / "cv.txt"
     if not cv_file.exists():
         return cv, p99
     for line in cv_file.read_text().splitlines():
-        m = re.search(r"CV.*= ([0-9.]+)", line)
+        m = re.search(r"CV\(downstream_cx_http2_total across pods\) = ([0-9.]+)", line)
         if m:
             cv = float(m.group(1))
         m = re.search(r"p99 latency = ([0-9.]+)s", line)

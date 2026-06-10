@@ -922,8 +922,14 @@ fi
 # ExactBalance). Both run -mode=distinct -c=300 so the control is a clean
 # paired measurement at the same load profile, not scenario 1 (which uses
 # c=100 for its H-A reference role).
-SCTL_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance-control/cv.txt" 2>/dev/null)"
-S13_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance/cv.txt" 2>/dev/null)"
+# The `|| true` is load-bearing on macOS-shipped bash 3.2: when scenario
+# 13 is skipped (IGW_CPU=1 default), these cv.txt files do not exist,
+# awk exits non-zero, and bash 3.2's `set -e` propagates the failure
+# out of the command substitution and kills the script before the plot
+# block runs. Bash 4+ does not have this behavior. Keeping the `|| true`
+# is the portable fix.
+SCTL_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance-control/cv.txt" 2>/dev/null || true)"
+S13_WORKER_CV_MEAN="$(awk '/^  CV\(worker_N.*mean across pods\)/{print $NF}' "${RESULTS_DIR}/13-conn-balance/cv.txt" 2>/dev/null || true)"
 if [[ -n "${S13_WORKER_CV_MEAN}" && "${S13_WORKER_CV_MEAN}" != "0" && "${S13_WORKER_CV_MEAN}" != "0.000" ]]; then
     echo ""
     echo "  H-E (within-pod worker balance via connection_balance_config):"
