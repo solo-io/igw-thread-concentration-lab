@@ -7,25 +7,22 @@
 # `k3d image import h2dial:local --cluster <cluster-name>` (no registry
 # round-trip needed). deploy.sh handles this end-to-end.
 
-FROM golang:1.25-alpine AS build
+# Base images are pinned by digest, not tag, so two builds weeks apart
+# produce byte-identical layers regardless of upstream tag movement.
+# To bump:
+#   docker pull golang:1.25-alpine                 # or the new tag
+#   docker inspect --format='{{index .RepoDigests 0}}' golang:1.25-alpine
+# then paste the new sha256 below. Same for the distroless runtime.
+# The Go module lockfile (go.mod + go.sum) handles dep drift; this pin
+# handles toolchain + libc + ca-cert drift in the builder/runtime images.
+FROM golang:1.25-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS build
 WORKDIR /src
-# go.mod and go.sum are committed; the build uses them directly so the
-# whole transitive dependency graph is content-hash-locked. v0.40.0 of
-# golang.org/x/net is the pinned direct dep; bump by editing go.mod and
-# running `go mod tidy` locally.
-#
-# Note on base image floats: `golang:1.25-alpine` follows the latest Go
-# 1.25 patch on every build, and `gcr.io/distroless/static-debian12` is
-# similarly tag-pinned rather than digest-pinned. The Go module lockfile
-# isolates us from dep drift, but two builds weeks apart can still pull
-# different toolchain patches. For byte-exact reproducibility, pin both
-# bases to digests captured via `docker buildx imagetools inspect`.
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /h2dial main.go
 
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12@sha256:9c346e4be81b5ca7ff31a0d89eaeade58b0f95cfd3baed1f36083ddb47ca3160
 COPY --from=build /h2dial /h2dial
 # /bin/sh is NOT available in distroless. The keep-alive mode is invoked
 # via `args: ["-idle"]` in the Deployment spec; load runs are kubectl exec

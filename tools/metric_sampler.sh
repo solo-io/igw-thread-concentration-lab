@@ -26,8 +26,10 @@ OUT_FILE="$3"
 SENTINEL="$4"
 INTERVAL="${5:-5}"
 
-LISTENER_PREFIX='http.outbound_0.0.0.0_8080;'
-CLUSTER_PREFIX='cluster.outbound|8080||httpbin.igw-test.svc.cluster.local;'
+# Shared constants (LISTENER_PREFIX, CLUSTER_PREFIX) come from lib.sh so
+# they cannot drift from run-tests.sh's values.
+# shellcheck disable=SC1091
+source "$(dirname "$0")/lib.sh"
 
 mkdir -p "$(dirname "${OUT_FILE}")"
 echo "timestamp,cv,sum_cx,sum_rq,upstream_p50,upstream_p95,upstream_p99" > "${OUT_FILE}"

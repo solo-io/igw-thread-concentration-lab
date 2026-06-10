@@ -121,18 +121,10 @@ IGW_URL="http://istio-ingressgateway.${NAMESPACE_ISTIO}:80"
 : "${SCENARIO_WARMUP_DURATION:=15s}"
 : "${SCENARIO_MEASURE_DURATION:=60s}"
 
-# Stat name prefixes used everywhere.
-# The trailing semicolon on LISTENER_PREFIX and CLUSTER_PREFIX is part of
-# Envoy's stat namespace separator: stats look like
-# `http.outbound_0.0.0.0_8080;.downstream_cx_active`. Querying without
-# the semicolon returns 0 silently. LISTENER_RAW is the listener-level
-# stat root (no trailing semicolon).
-# The IGW Service maps host port 80 to container port 8080, which is why
-# the listener prefix uses 8080 even though the Gateway resource specifies
-# port 80.
-LISTENER_PREFIX='http.outbound_0.0.0.0_8080;'
-LISTENER_RAW='listener.0.0.0.0_8080'
-CLUSTER_PREFIX='cluster.outbound|8080||httpbin.igw-test.svc.cluster.local;'
+# Stat name prefixes are defined in tools/lib.sh and sourced here. Same
+# file is sourced by tools/metric_sampler.sh so the two stay aligned.
+# shellcheck disable=SC1091
+source "${TOOLS}/lib.sh"
 
 # --- Preflight --------------------------------------------------------------
 # Without this check, a missing or stale cluster context produces cryptic

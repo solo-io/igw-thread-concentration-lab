@@ -95,8 +95,12 @@ func main() {
 	}
 
 	var totalReqs, errs int64
-	var latMu sync.Mutex
-	latencies := make([]time.Duration, 0, 1<<20)
+	// Each worker writes to its own latency slice; no lock during the run.
+	// At the lab's 500 goroutines + 5k+ RPS the prior single-mutex pattern
+	// serialized every request append and added a measurable floor to the
+	// p99 the lab reports as a gateway-side number. Merge at the end into
+	// one sorted slice for percentile computation.
+	perWorkerLatencies := make([][]time.Duration, *concurrent)
 
 	// Parse -header once. Applied to every outbound request (primary and
 	// slow-URL workers alike); the parsing used to live inside the
@@ -123,8 +127,12 @@ func main() {
 		if *mode == "distinct" {
 			myClient = clients[i]
 		}
-		go func(c *http.Client) {
+		go func(c *http.Client, idx int) {
 			defer wg.Done()
+			// Pre-size for a typical 60s measure run at ~10k req/s per
+			// worker. Append still grows; this just avoids the first
+			// dozen reallocations.
+			local := make([]time.Duration, 0, 1<<16)
 			for ctx.Err() == nil {
 				rstart := time.Now()
 				req, err := http.NewRequestWithContext(ctx, "GET", *url, nil)
@@ -144,11 +152,10 @@ func main() {
 				_ = resp.Body.Close()
 				lat := time.Since(rstart)
 				atomic.AddInt64(&totalReqs, 1)
-				latMu.Lock()
-				latencies = append(latencies, lat)
-				latMu.Unlock()
+				local = append(local, lat)
 			}
-		}(myClient)
+			perWorkerLatencies[idx] = local
+		}(myClient, i)
 	}
 	// HOL blocking workload: extra workers firing the slow URL on the
 	// SAME http.Client (shared mode only). These do not contribute to
@@ -184,6 +191,15 @@ func main() {
 
 	elapsed := time.Since(start)
 
+	// Merge per-worker slices into one for percentile computation.
+	totalLat := 0
+	for _, s := range perWorkerLatencies {
+		totalLat += len(s)
+	}
+	latencies := make([]time.Duration, 0, totalLat)
+	for _, s := range perWorkerLatencies {
+		latencies = append(latencies, s...)
+	}
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	pct := func(p float64) float64 {
 		if len(latencies) == 0 {

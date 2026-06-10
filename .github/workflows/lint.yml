@@ -32,7 +32,7 @@ jobs:
       # ----------------------------------------------------------------
       - name: bash -n on shell scripts
         run: |
-          for f in deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh; do
+          for f in deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh tools/lib.sh; do
             echo "  bash -n ${f}"
             bash -n "${f}"
           done
@@ -51,7 +51,7 @@ jobs:
         with:
           severity: warning
           scandir: ./
-          additional_files: deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh
+          additional_files: deploy.sh run-tests.sh cleanup.sh tools/cpu_sampler.sh tools/metric_sampler.sh tools/lib.sh
 
       # ----------------------------------------------------------------
       # Dashboard: ensure the JSON is parseable. Anything beyond well-
@@ -119,3 +119,40 @@ jobs:
           go mod download
           go vet ./...
           go build ./...
+
+      # ----------------------------------------------------------------
+      # hadolint: lint the two Dockerfiles. ghz-image/Dockerfile
+      # suppresses:
+      #   DL3029: --platform=linux/amd64 is the whole point of the file
+      #           (arm64 Rosetta path for an amd64-only binary).
+      #   DL3018: pinning every transitive apk package (curl and ca-cert)
+      #           to a specific version is more bookkeeping than the
+      #           digest-pinned alpine base already gives us. The base
+      #           image hash effectively freezes the repo index.
+      #   DL4006: the only pipe in RUN is `echo "<hash>" | sha256sum -c`,
+      #           where echo cannot fail. The downstream `&&` chain
+      #           handles every other error path.
+      # ----------------------------------------------------------------
+      - name: hadolint h2dial/Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf  # v3.1.0
+        with:
+          dockerfile: h2dial/Dockerfile
+      - name: hadolint ghz-image/Dockerfile
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf  # v3.1.0
+        with:
+          dockerfile: ghz-image/Dockerfile
+          ignore: DL3029,DL3018,DL4006
+
+      # ----------------------------------------------------------------
+      # yamllint: structural / style sanity on every YAML the lab ships.
+      # Uses the `relaxed` ruleset (line-length off, document-start off,
+      # truthy off) because the manifests are hand-edited and don't
+      # benefit from rigid formatting rules. Catches the things that
+      # genuinely break: duplicate keys, indentation that flips meaning,
+      # trailing tabs that some editors paste in.
+      # ----------------------------------------------------------------
+      - name: yamllint manifests
+        run: |
+          pip install --quiet yamllint==1.35.1
+          yamllint -d relaxed manifests/
+          echo "  yamllint: manifests/ clean"
