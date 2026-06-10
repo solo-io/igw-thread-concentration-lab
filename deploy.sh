@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# deploy.sh -- Deploy the lab base environment.
+# deploy.sh: deploy the lab base environment.
 #
 # Hypothesis under test (full statement in PLAN.md):
 #   Connection-and-thread-level concentration at the Istio Ingress Gateway.
@@ -98,7 +98,7 @@ fi
 echo "  Version: $(${ISTIOCTL} version --remote=false 2>/dev/null || echo 'unknown')"
 
 # --- Step 2: Create k3d cluster --------------------------------------------
-if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}\s"; then
+if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
     echo "[2/9] Cluster '${CLUSTER_NAME}' already exists"
 else
     echo "[2/9] Creating k3d cluster '${CLUSTER_NAME}' (1 server + 2 agents)..."
@@ -124,8 +124,11 @@ kubectl --context "${CONTEXT}" wait --for=condition=Ready nodes --all --timeout=
 # Learning L002: k3s stores CNI config and binaries in non-standard paths.
 # Without the cni.cniConfDir and cni.cniBinDir overrides, the istio-cni
 # DaemonSet appears healthy but istiod and other pods stick in
-# ContainerCreating with the kubelet error "failed to find plugin
-# 'istio-cni' in path [/bin]".
+# ContainerCreating with a kubelet error of the form "failed to find
+# plugin 'istio-cni' in path [<some dir>]". The bin dir matches what
+# k3s's kubelet uses as CNI_BIN_DIR; on recent k3d/k3s (v5.9 / v1.35+)
+# that's /var/lib/rancher/k3s/data/cni rather than /bin. The conf dir
+# is stable across k3s versions.
 #
 # IGW sizing: defaults are IGW_REPLICAS=6 with IGW_CPU=1 (one worker
 # thread per pod, 6 worker threads total). Enough pods for per-pod
@@ -152,7 +155,7 @@ else
         --set profile=ambient \
         --set "meshConfig.defaultConfig.concurrency=${IGW_CPU}" \
         --set values.cni.cniConfDir=/var/lib/rancher/k3s/agent/etc/cni/net.d \
-        --set values.cni.cniBinDir=/bin \
+        --set values.cni.cniBinDir=/var/lib/rancher/k3s/data/cni \
         --set components.ingressGateways[0].name=istio-ingressgateway \
         --set components.ingressGateways[0].enabled=true \
         --set components.ingressGateways[0].k8s.replicaCount=${IGW_REPLICAS} \
@@ -440,11 +443,11 @@ fi
 echo "[9/9] Smoke-testing the data path through the gateway..."
 sleep 5  # let endpoints settle
 SMOKE="$(kubectl --context "${CONTEXT}" exec -n "${NAMESPACE_LOAD}" deploy/fortio -- \
-    fortio curl "http://istio-ingressgateway.istio-system:80/get" 2>&1 | head -10 || true)"
+    fortio curl "http://istio-ingressgateway.${NAMESPACE_ISTIO}:80/get" 2>&1 | head -10 || true)"
 # Match on "HTTP/<ver> 200 ..." so a Content-Length: 200 or similar
 # stray "200" elsewhere in the response can't false-pass. Note: fortio's
 # `-quiet` flag strips the HTTP status line, leaving only the response
-# body — which does NOT contain "HTTP/.* 200". So we run without -quiet
+# body, which does NOT contain "HTTP/.* 200". So we run without -quiet
 # and capture enough of the head to include the status line.
 if echo "${SMOKE}" | grep -Eq 'HTTP/[0-9.]+ 200'; then
     echo "  PASS: gateway returned 200 for /get"

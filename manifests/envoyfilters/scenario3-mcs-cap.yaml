@@ -1,4 +1,4 @@
-# Scenario 3: Fix 1 (H-B) -- max_concurrent_streams cap forces redistribution
+# Scenario 3: Fix 1 (H-B). max_concurrent_streams cap forces redistribution.
 #
 # Cap streams per connection at 128. Compliant HTTP/2 clients (per RFC 9113)
 # open additional connections once the cap is reached. With the load gen

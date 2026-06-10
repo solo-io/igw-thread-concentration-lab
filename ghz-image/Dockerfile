@@ -10,9 +10,17 @@
 # platform so on Apple Silicon hosts the container runs under Rosetta
 # emulation; on amd64 hosts this is a no-op.
 FROM --platform=linux/amd64 alpine:3.19
+# Verify the downloaded tarball against a known-good sha256 before
+# extracting. ghz does not publish a checksums.txt with its release, so
+# this is the only available defense against a tampered tarball or a
+# silent re-tag. Computed locally with `shasum -a 256 ghz-linux-x86_64.tar.gz`
+# against the v0.120.0 release; update both the URL and the hash on
+# version bump.
 RUN apk add --no-cache curl ca-certificates && \
-    curl -L "https://github.com/bojand/ghz/releases/download/v0.120.0/ghz-linux-x86_64.tar.gz" \
+    curl -fL "https://github.com/bojand/ghz/releases/download/v0.120.0/ghz-linux-x86_64.tar.gz" \
         -o /tmp/ghz.tar.gz && \
+    echo "c1b5eee89fd7c779213f198753d1d961dfbcb257bc470eb3c336f333060a6d6c  /tmp/ghz.tar.gz" \
+        | sha256sum -c - && \
     tar -xzf /tmp/ghz.tar.gz -C /usr/local/bin/ ghz && \
     rm /tmp/ghz.tar.gz && \
     apk del curl

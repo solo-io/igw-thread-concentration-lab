@@ -13,6 +13,13 @@ WORKDIR /src
 # whole transitive dependency graph is content-hash-locked. v0.40.0 of
 # golang.org/x/net is the pinned direct dep; bump by editing go.mod and
 # running `go mod tidy` locally.
+#
+# Note on base image floats: `golang:1.25-alpine` follows the latest Go
+# 1.25 patch on every build, and `gcr.io/distroless/static-debian12` is
+# similarly tag-pinned rather than digest-pinned. The Go module lockfile
+# isolates us from dep drift, but two builds weeks apart can still pull
+# different toolchain patches. For byte-exact reproducibility, pin both
+# bases to digests captured via `docker buildx imagetools inspect`.
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go .

@@ -1,4 +1,4 @@
-# Scenario 2: Trigger (H-A) -- high concurrent streams, few connections
+# Scenario 2: Trigger (H-A). High concurrent streams, few connections.
 #
 # Pin max_concurrent_streams: 65536 (Istio's effective default) at the HCM,
 # explicit so scenario 3 can compare against it. Run-tests.sh drives 5000

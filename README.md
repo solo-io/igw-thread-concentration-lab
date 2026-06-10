@@ -33,25 +33,25 @@ That is the whole story, and everything in this lab is a consequence:
 
 The four core hypotheses encoded in this lab:
 
-- **H-A — the mechanism is real**: low connection cardinality + HTTP/2 multiplexing produces uneven load distribution across gateway pods, measurable as a high coefficient of variation (CV) of `downstream_cx_active`. Scenarios 1 and 2 exercise it.
-- **H-B — capping streams forces dial-out, but only on smart clients**: lowering `max_concurrent_streams` makes the server send `REFUSED_STREAM`. A standards-compliant HTTP/2 client (Go's `net/http2`) dials a new connection. A queueing client (`fortio` with a fixed pool, or gRPC's single `ClientConn` per peer) just waits. Scenarios 3 and 3-fortio prove this both ways.
-- **H-C — counting requests forces rotation regardless of client behavior**: `max_requests_per_connection` triggers `GOAWAY` after N requests on a connection, forcing the client to reconnect. Both queueing and dialing clients respect `GOAWAY`. Scenarios 4 and 4-fortio prove it; this is usually the most robust lever in production.
-- **H-D — flow-control windows can be a hidden bottleneck**: the default 64 KiB HTTP/2 stream and connection windows are too small for high-byte-throughput workloads concentrated on few connections. Scenario 5 exercises 1 MiB; scenario 8 exercises 4 MiB at the listener buffer level.
+- **H-A, the mechanism is real**: low connection cardinality + HTTP/2 multiplexing produces uneven load distribution across gateway pods, measurable as a high coefficient of variation (CV) of `downstream_cx_active`. Scenarios 1 and 2 exercise it.
+- **H-B, capping streams forces dial-out, but only on smart clients**: lowering `max_concurrent_streams` makes the server send `REFUSED_STREAM`. A standards-compliant HTTP/2 client (Go's `net/http2`) dials a new connection. A queueing client (`fortio` with a fixed pool, or gRPC's single `ClientConn` per peer) just waits. Scenarios 3 and 3-fortio prove this both ways.
+- **H-C, counting requests forces rotation regardless of client behavior**: `max_requests_per_connection` triggers `GOAWAY` after N requests on a connection, forcing the client to reconnect. Both queueing and dialing clients respect `GOAWAY`. Scenarios 4 and 4-fortio prove it; this is usually the most robust lever in production.
+- **H-D, flow-control windows can be a hidden bottleneck**: the default 64 KiB HTTP/2 stream and connection windows are too small for high-byte-throughput workloads concentrated on few connections. Scenario 5 exercises 1 MiB; scenario 8 exercises 4 MiB at the listener buffer level.
 
 Plus an orthogonal extension covering a third axis of thread-level concentration:
 
-- **H-E — within-pod worker balance via `connection_balance_config`**: at `concurrency >= 2`, kernel-driven `accept()` races inside a multi-thread pod can produce uneven per-worker connection distribution even when per-pod distribution is even. Envoy's listener `connection_balance_config: exact_balance` replaces the kernel race with an Envoy-managed counter. **Orthogonal to H-A through H-D**: it does NOT redistribute connections across pods. Scenario 13 exercises it (gated on `concurrency >= 2`; auto-skips at the lab's default `concurrency=1`).
+- **H-E, within-pod worker balance via `connection_balance_config`**: at `concurrency >= 2`, kernel-driven `accept()` races inside a multi-thread pod can produce uneven per-worker connection distribution even when per-pod distribution is even. Envoy's listener `connection_balance_config: exact_balance` replaces the kernel race with an Envoy-managed counter. **Orthogonal to H-A through H-D**: it does NOT redistribute connections across pods. Scenario 13 exercises it (gated on `concurrency >= 2`; auto-skips at the lab's default `concurrency=1`).
 
 ### Picking between H-C and H-E
 
-`max_requests_per_connection` (H-C) and `connection_balance_config: exact_balance` (H-E) both "force redistribution," which is enough to make them sound interchangeable. They aren't. They operate at different scopes — and picking the wrong one for your symptom does nothing.
+`max_requests_per_connection` (H-C) and `connection_balance_config: exact_balance` (H-E) both "force redistribution," which is enough to make them sound interchangeable. They aren't. They operate at different scopes, and picking the wrong one for your symptom does nothing.
 
 | If your symptom is… | The fix is… | Why the other one doesn't help |
 |---|---|---|
-| Few clients pinned to few gateway pods (e.g. kube-proxy or L4 LB collapsed connection cardinality) | **H-C** — `max_requests_per_connection`. Forces clients to redial; new TCP connections get re-hashed and may land elsewhere. | `connection_balance_config` does nothing across pods. Your one hot pod's workers are all hot. Balancing within it doesn't move load off the pod. |
-| Per-pod load is even, but one worker thread inside a pod is saturated | **H-E** — `connection_balance_config: exact_balance`. Picks the worker with fewest active connections at accept time. | `max_requests_per_connection` doesn't help intra-pod. New connections still hit the same kernel accept race inside the same pod. |
+| Few clients pinned to few gateway pods (e.g. kube-proxy or L4 LB collapsed connection cardinality) | **H-C**: `max_requests_per_connection`. Forces clients to redial; new TCP connections get re-hashed and may land elsewhere. | `connection_balance_config` does nothing across pods. Your one hot pod's workers are all hot. Balancing within it doesn't move load off the pod. |
+| Per-pod load is even, but one worker thread inside a pod is saturated | **H-E**: `connection_balance_config: exact_balance`. Picks the worker with fewest active connections at accept time. | `max_requests_per_connection` doesn't help intra-pod. New connections still hit the same kernel accept race inside the same pod. |
 
-In production, both can stack — they don't conflict. If you only get to deploy one and you're not sure which symptom you have, **start with H-C**: it has lower deployment risk (no in-Envoy mutex), works against any client behavior, and addresses the more common production failure mode.
+In production, both can stack; they don't conflict. If you only get to deploy one and you're not sure which symptom you have, **start with H-C**: it has lower deployment risk (no in-Envoy mutex), works against any client behavior, and addresses the more common production failure mode.
 
 Plus secondary explorations: scenario 9 (head-of-line blocking on slow streams), scenario 10 (rotation-induced spikes), scenarios 6/7 (mechanism transfer through the waypoint hop), scenario 11 (filter-chain overhead at scale), scenario 12 (gRPC variant via `ghz`).
 
@@ -80,8 +80,8 @@ Source: [`diagrams/architecture.d2`](diagrams/architecture.d2). Render: `d2 arch
 - **Standard `istio-ingressgateway`** at the edge: 6 replicas, 1 worker thread each. The HPA is deleted on deploy so low-CPU scenarios cannot scale it back to 1. The IGW pod template is patched with a `proxyStatsMatcher` annotation so Envoy emits the connection-, listener-, and flow-control-level stats the dashboard depends on (which Istio's default matcher excludes).
 - **`mccutchen/go-httpbin`** backend in `igw-test` namespace (ambient). Endpoints used: `/get` (default), `/bytes/N` (deterministic payloads, used in scenarios 5 and 8), `/delay/N` (slow-stream HOL test, scenario 9).
 - **Two load generators** in `loadgen` namespace, intentionally NOT in ambient (we are testing client HTTP/2 connection-pool behavior; we do not want a transparent proxy in the path):
-  - `fortio` — fixed connection pool per goroutine; queues at the cap.
-  - `h2dial` — custom Go client with shared transport; dials new connections at the cap.
+  - `fortio`: fixed connection pool per goroutine; queues at the cap.
+  - `h2dial`: custom Go client with shared transport; dials new connections at the cap.
 - **`kube-prometheus-stack`** in `monitoring` namespace. `PodMonitor`s scrape `:15090` on the IGW, waypoint, and ztunnel pods. The dashboard ships as a Grafana sidecar-loaded ConfigMap, sourced from [`dashboard/igw-thread-concentration.json`](dashboard/igw-thread-concentration.json).
 - **Optional waypoint** for scenarios 6 and 7 (mechanism-transfer test through the L7 hop). Toggled per scenario by labeling the `httpbin` Service `istio.io/use-waypoint=igw-test-waypoint`.
 
@@ -131,7 +131,7 @@ Single-scenario re-runs are common while you experiment:
 
 ## Walking through the scenarios
 
-Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate one effect. The point is not to prove a scenario "passes" — it's to leave you with a feel for what each lever does and how to recognize each effect in metrics.
+Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate one effect. The point is not to prove a scenario "passes"; it's to leave you with a feel for what each lever does and how to recognize each effect in metrics.
 
 | # | Name | Client | Variable | What it teaches | What to watch |
 |---|---|---|---|---|---|
@@ -139,13 +139,13 @@ Each scenario varies one EnvoyFilter knob (or one client behavior) to isolate on
 | 2 | trigger | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 65536` (Istio default) | **The mechanism.** Few connections, no cap → streams pin to a few worker threads. | CV jumps (~1.0). Dashboard "Active connections per pod" shows 2-3 hot pods, the rest at zero. |
 | 3 | mcs-cap | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 128` | A smart client dials new connections when the cap is hit, redistributing. | CV drops vs s2; pool grows from ~3 to ~5 connections. Compare to s3-fortio below. |
 | 4 | mrpc | h2dial `-mode=shared -c 500` | `max_requests_per_connection: 10000` | **The most robust lever.** Server-issued GOAWAYs force rotation on every client. | `cx_max_requests_reached` non-zero. Even per-pod distribution. |
-| 5 | windows | h2dial `-mode=shared`, `/bytes/16384` | `initial_*_window_size: 1 MiB` | Default 64 KiB windows can be a hidden bottleneck at high byte throughput on few connections. | `flow_control_paused_reading_total` rate. Compare s2 (~730/sec) to s5. |
+| 5 | windows | h2dial `-mode=shared`, `/bytes/16384` | `initial_*_window_size: 1 MiB` | Default 64 KiB windows can be a hidden bottleneck at high byte throughput on few connections. | `flow_control_paused_reading_total` rate. Compare s2 to s5; at sub-ms intra-cluster RTT the lever's direction is conditional (see Findings). |
 | 6 | waypoint-baseline | h2dial `-mode=distinct -c 100`, with waypoint | (none) | Sanity check that the waypoint hop on its own is fine. | CV low (~0.1). |
 | 7 | waypoint-trigger | h2dial `-mode=shared -c 500`, with waypoint | `max_concurrent_streams: 65536` | Same mechanism transfers through the L7 waypoint hop, and concentration **compounds** rather than dampening. | CV at the waypoint pods rises in step with the trigger; ztunnel HBONE metrics show concentration upstream of the waypoint too. |
 | 8 | buffers | h2dial `-mode=shared`, `/bytes/65536` | listener `per_connection_buffer_limit_bytes: 4 MiB` | Per-connection buffer pressure is a separate axis from flow-control windows. | `tx/rx_bytes_buffered` should drop. |
 | 9 | hol-blocking | h2dial 500 fast + 5 slow `/delay/2` workers | (none) | Slow streams block fast streams sharing the same connection. `stream_idle_timeout` does NOT catch this; only stream-cap reduction does. | p99 elevated vs s2 by the slow-stream tax. |
 | 10 | rotation | h2dial `-mode=shared -c 500` | `max_connection_duration: 10s` | Time-based rotation produces periodic spikes. In real mTLS, the spikes carry a handshake-CPU cost. | Periodic p99 spikes timed to ~10s; `cx_max_duration_reached` rate non-zero. |
-| 11 | realistic-filters | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 65536` + access-log filter | Filter-chain overhead at scale. Most production stacks include a JSON access log and JWT validation. | Compare p99 to s2; a well-tuned filter chain (response-flag-filtered access log) is typically negligible. |
+| 11 | realistic-filters | h2dial `-mode=shared -c 500` | `max_concurrent_streams: 65536` + access-log filter + JWT validation (layered when the runner can fetch the demo JWT) | Filter-chain overhead at scale. Most production stacks include a JSON access log and JWT validation. | Compare p99 to s2; a well-tuned filter chain (response-flag-filtered access log) is typically negligible. |
 | 02-fortio | trigger (fortio) | fortio `-c 2 -qps 5000` | `max_concurrent_streams: 65536` | Same mechanism as s2, queueing client. | High CV. |
 | 03-fortio | mcs-cap (fortio) | fortio `-c 2 -qps 5000` | `max_concurrent_streams: 128` | Confirms a queueing client does NOT dial out: cap reduction does nothing. | CV unchanged vs 02-fortio. **The point: don't expect `max_concurrent_streams` alone to fix things if your clients are queueing.** |
 | 04-fortio | mrpc (fortio) | fortio `-c 2 -qps 5000` | `max_requests_per_connection: 10000` | Confirms count rotation works on a queueing client. | Even per-pod distribution after ~20 GOAWAYs fire. The most important comparison in the whole lab. |
@@ -159,7 +159,7 @@ After `run-tests.sh` finishes, four things are worth looking at:
 
 1. **The hypothesis-evaluation block printed to stdout**. Plain text summary of which hypothesis passed, refused, or was inconclusive on this run, with the CV and GOAWAY numbers backing the call. This is the at-a-glance answer to "what just happened."
 2. **`results/<latest>/plots/`**. Six PNGs comparing scenarios side-by-side. `cv_across_scenarios.png` is the most important: it puts every scenario on one chart so you can see at a glance which levers move which clients.
-3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV — relevant for H-E / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
+3. **`results/<latest>/<scenario>/`**. Per-scenario raw data: pre/post stat dumps, `cv.txt` (per-pod CV across the gateway and per-pod worker CV mean+max within each pod), `worker_cv_per_pod.txt` (one row per pod with its within-pod worker CV, relevant for H-E / scenario 13), `timeseries.csv`, the cpu_sampler trace (per-pod CPU + per-worker accept counters), and the Envoy admin `clusters` and `listeners` snapshots.
 4. **The Grafana dashboard live during the run**. Watching the "CV across pods" panel rise as scenario 2 starts and fall as scenario 4's GOAWAYs fire is the moment the mechanism stops being abstract.
 
 ## Metrics: how to think about them
@@ -168,7 +168,7 @@ The lab captures and graphs ~20 metrics across the IGW listener, the upstream cl
 
 **Aggregate metrics hide concentration. Distribution metrics reveal it.**
 
-That is the whole insight. Total RPS, total CPU, total open connections, even p99 across the gateway as a whole — none of these will change much during scenario 2 vs scenario 1 in this lab. The thing that moves is the **variance across pods**.
+That is the whole insight. Total RPS, total CPU, total open connections, even p99 across the gateway as a whole. None of these will change much during scenario 2 vs scenario 1 in this lab. The thing that moves is the **variance across pods**.
 
 The headline query for hotspot detection is the **coefficient of variation of `envoy_http_downstream_cx_active`**:
 
@@ -206,7 +206,7 @@ rate(envoy_cluster_upstream_flow_control_paused_reading_total{
 
 If this is non-zero at significant rate, your sender is stalling on `WINDOW_UPDATE` round-trips. Raise `initial_stream_window_size` and `initial_connection_window_size` on the HCM `http2_protocol_options`.
 
-The full metric reference table — what each one tells you, where to find it in the dashboard, and a copy-pasteable PromQL with the lab's selectors — is below. Replace the cluster name `outbound|8080||httpbin.igw-test.svc.cluster.local` with your backend's cluster name, and the HCM prefix `outbound_0.0.0.0_8080` with your IGW's listener prefix, when adapting the queries.
+The full metric reference table (what each one tells you, where to find it in the dashboard, and a copy-pasteable PromQL with the lab's selectors) is below. Replace the cluster name `outbound|8080||httpbin.igw-test.svc.cluster.local` with your backend's cluster name, and the HCM prefix `outbound_0.0.0.0_8080` with your IGW's listener prefix, when adapting the queries.
 
 | # | Metric | Type | PromQL example | Why it matters |
 |---|---|---|---|---|
@@ -330,7 +330,7 @@ The build phase surfaced these gotchas. They are now handled by the scripts, but
 - **Fortio HTTP/2 flag is `-h2`** (lowercase), not `-H2`.
 - **Istio IGW comes with an HPA at `minReplicas: 1`**. Reconciles to 1 replica during low-CPU scenarios. `deploy.sh` deletes it.
 - **Default `proxyStatsMatcher` excludes connection-level stats**. Istio 1.18+ filters `downstream_cx_*`, `flow_control_*`, listener stats by default. `deploy.sh` patches the IGW with a broader `inclusionRegexps`.
-- **`istio-proxy` is heavily stripped down**. The container has no `sh`, no `curl`, no `top`, no `pgrep`, no `ps` — anything you'd reach for in a normal pod is unavailable. The only way in is `pilot-agent request GET <path>` against the local Envoy admin. The lab's per-worker measurement uses the admin's `listener.0.0.0.0_8080.worker_N.downstream_cx_*` counters for the same reason.
+- **`istio-proxy` is heavily stripped down**. The container has no `sh`, no `curl`, no `top`, no `pgrep`, no `ps`. Anything you'd reach for in a normal pod is unavailable. The only way in is `pilot-agent request GET <path>` against the local Envoy admin. The lab's per-worker measurement uses the admin's `listener.0.0.0.0_8080.worker_N.downstream_cx_*` counters for the same reason.
 - **Gateway API CRDs not installed by default**. Required for the waypoint resource. `deploy.sh` installs `kubernetes-sigs/gateway-api` v1.2.1.
 - **IGW listener stat prefix has a trailing semicolon**: `http.outbound_0.0.0.0_8080;`. Stat queries assuming no semicolon return zeros silently.
 - **`grafana-image-renderer` is amd64-only**. We avoid the in-process Grafana plugin (which is statically linked against Grafana's architecture and breaks the arm64 Grafana container) and instead deploy it as a separate sidecar pod, pulled with `--platform=linux/amd64` and imported into k3d. On Apple Silicon hosts the sidecar runs under Rosetta; on amd64 hosts it runs natively. If the sidecar fails to start, `run-tests.sh` falls back to printing a manual screenshot URL.
@@ -382,5 +382,5 @@ The lab is intentionally scoped tight. Things that would be valuable but aren't 
 - [Istio HBONE protocol](https://istio.io/latest/docs/ambient/architecture/hbone/)
 - [Istio waypoint usage](https://istio.io/latest/docs/ambient/usage/waypoint/)
 - [Solo Enterprise for Istio: ambient](https://docs.solo.io/gloo-mesh/latest/ambient/)
-- [Istio issue #58114 — HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)
+- [Istio issue #58114: HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)
 - [RFC 9113 (HTTP/2)](https://datatracker.ietf.org/doc/html/rfc9113)

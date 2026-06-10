@@ -1,4 +1,4 @@
-# Scenario 10: secondary cause #5 -- connection rotation (mTLS handshake cost proxy)
+# Scenario 10: secondary cause #5. Connection rotation (mTLS handshake cost proxy).
 #
 # The hypothesis: when connection rotation kicks in (e.g., 150s
 # max_connection_duration) with few connections in flight, each rotation

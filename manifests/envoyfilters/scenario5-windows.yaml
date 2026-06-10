@@ -1,4 +1,4 @@
-# Scenario 5: Fix 3 (H-D) -- HTTP/2 flow-control window saturation
+# Scenario 5: Fix 3 (H-D). HTTP/2 flow-control window saturation.
 #
 # Raise initial_stream_window_size and initial_connection_window_size from
 # the 64 KiB defaults to 1 MiB. Other settings stay at scenario 2 defaults.

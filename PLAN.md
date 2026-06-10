@@ -56,7 +56,7 @@ Each hypothesis names a claim, a mechanism, and the metric that would confirm or
 
 **Reasoning:** Per the [HTTP/2 RFC 9113 flow-control section](https://www.rfc-editor.org/rfc/rfc9113.html#name-flow-control), once a stream's window is exhausted the sender must pause until the receiver issues a `WINDOW_UPDATE`. With many streams sharing one connection, the per-connection window can fill faster than `WINDOW_UPDATE` round-trips can refill it, especially at high response size or RTT. This appears as gateway-side slowness even when CPU and memory are fine. Raising the windows widens the buffer between `WINDOW_UPDATE` round-trips.
 
-**Refutation possibility worth calling out:** flow-control saturation does not appear at the lab's reachable scale. We see it does — at 64 KiB defaults the pause rate is significant — but raising windows to 1 MiB is only a partial mitigation (~21% drop in pause rate). For high-byte-throughput production workloads, 4 MiB or higher is more realistic. This is a refinement of the claim, not a refutation.
+**Empirical caveat: REFUTE at lab RTT.** Across three back-to-back runs in this lab, raising the window from 64 KiB to 1 MiB did NOT reduce the pause counter; it raised it. The s5 / s2 paused-rate ratios were 1.43, 1.33, 1.21. At sub-millisecond intra-cluster RTT the 64 KiB default is not the bottleneck, and the larger buffer just lets more data accumulate before backpressure fires. Cross-AZ and cross-region RTT (0.5+ ms) should produce a different result; the lab cannot resolve that. See "What k3d cannot demonstrate" below.
 
 **Confirmation signal:** `rate(flow_control_paused_reading_total)` non-zero at default windows; drops when windows are raised. The drop scales with the window size.
 
@@ -211,11 +211,11 @@ Five things require a cloud-scale environment:
 
 2. **L4 LB hash dynamics**. Real-world hotspotting often originates at the edge LB (e.g., AWS NLB cross-zone or zonal-affinity behavior). The lab drives low connection cardinality directly via the load gen's `-c` flag, which proves the *consequence* but not the *trigger*. An EKS-behind-NLB reproducer would be needed to study the trigger specifically.
 
-3. **Cross-AZ flow-control RTT**. HTTP/2 default 64 KiB windows saturate as a function of RTT × bandwidth. Intra-cluster RTT in k3d is sub-millisecond; cross-AZ RTT in real cloud topologies is 0.5–2 ms; cross-region is 20+ ms. The lab's H-D shows windows are real and that 1 MiB is insufficient *at this RTT*. The right window size at production RTT is empirically different and needs to be measured at production RTT.
+3. **Cross-AZ flow-control RTT**. HTTP/2 default 64 KiB windows saturate as a function of RTT × bandwidth. Intra-cluster RTT in k3d is sub-millisecond; cross-AZ RTT in real cloud topologies is 0.5 to 2 ms; cross-region is 20+ ms. The lab's H-D shows windows are real and that 1 MiB is insufficient *at this RTT*. The right window size at production RTT is empirically different and needs to be measured at production RTT.
 
 4. **Real client-population variance**. The lab uses h2dial / fortio / ghz with tightly-controlled connection counts. Production has hundreds of client pods with imperfect hash distribution and time-correlated arrivals. Variance characteristics differ.
 
-5. **Real mTLS handshake CPU**. Scenario 10 demonstrates the rotation pattern in plaintext. mTLS adds 0.5–5 ms of handshake CPU per rotation depending on key type (RSA vs ECDSA). The impact on tail latency under rotation is workload-dependent and only measurable in a real cert-issuing topology.
+5. **Real mTLS handshake CPU**. Scenario 10 demonstrates the rotation pattern in plaintext. mTLS adds 0.5 to 5 ms of handshake CPU per rotation depending on key type (RSA vs ECDSA). The impact on tail latency under rotation is workload-dependent and only measurable in a real cert-issuing topology.
 
 ### Practical guidance
 
@@ -246,8 +246,8 @@ The split is intentional. The lab's purpose is to be a fast, reproducible, local
 - [Istio HBONE protocol overview](https://istio.io/latest/docs/ambient/architecture/hbone/)
 - [Istio waypoint usage guide](https://istio.io/latest/docs/ambient/usage/waypoint/)
 - [Istio Gateway installation guide](https://istio.io/latest/docs/setup/additional-setup/gateway/)
-- [HTTP/2 RFC 9113 — `SETTINGS_MAX_CONCURRENT_STREAMS`](https://www.rfc-editor.org/rfc/rfc9113.html#name-defined-settings)
-- [HTTP/2 RFC 9113 — flow control](https://www.rfc-editor.org/rfc/rfc9113.html#name-flow-control)
+- [HTTP/2 RFC 9113: `SETTINGS_MAX_CONCURRENT_STREAMS`](https://www.rfc-editor.org/rfc/rfc9113.html#name-defined-settings)
+- [HTTP/2 RFC 9113: flow control](https://www.rfc-editor.org/rfc/rfc9113.html#name-flow-control)
 - [fortio load generator](https://github.com/fortio/fortio)
 - [ghz gRPC load tester](https://github.com/bojand/ghz)
 
@@ -258,5 +258,5 @@ The split is intentional. The lab's purpose is to be a fast, reproducible, local
 
 ### Related public GitHub issues
 
-- [istio/istio#49892 — High response times on ingress gateways](https://github.com/istio/istio/issues/49892)
-- [istio/istio#58114 — HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)
+- [istio/istio#49892: High response times on ingress gateways](https://github.com/istio/istio/issues/49892)
+- [istio/istio#58114: HTTP/2 single-connection throughput limitation](https://github.com/istio/istio/issues/58114)

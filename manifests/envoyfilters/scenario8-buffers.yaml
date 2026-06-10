@@ -1,4 +1,4 @@
-# Scenario 8: secondary cause #2 -- per_connection_buffer_limit_bytes
+# Scenario 8: secondary cause #2. per_connection_buffer_limit_bytes.
 #
 # Default Envoy listener per_connection_buffer_limit_bytes is 1 MiB. With
 # many concurrent streams sharing a connection at high byte throughput,
@@ -35,8 +35,13 @@ spec:
       operation: MERGE
       value:
         per_connection_buffer_limit_bytes: 4194304   # 4 MiB
-  # Also keep max_concurrent_streams at the high default so we exercise
-  # high stream concurrency that fills the buffer.
+  # Self-describing reassertion of max_concurrent_streams=65536, which
+  # is the Istio default (via PILOT_HTTP2_MAX_CONCURRENT_STREAMS); we
+  # restate it here so a reader can see at a glance that this scenario
+  # exercises the same high-stream-concurrency regime as scenario 2,
+  # not a different one. Materially a no-op delta vs scenario 2's
+  # baseline: the ONLY variable this scenario isolates is the listener
+  # `per_connection_buffer_limit_bytes` patch above.
   - applyTo: NETWORK_FILTER
     match:
       context: GATEWAY

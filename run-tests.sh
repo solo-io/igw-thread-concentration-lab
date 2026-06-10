@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# run-tests.sh -- Execute the scenario suite. See PLAN.md for the
+# run-tests.sh: execute the scenario suite. See PLAN.md for the
 # hypothesis design and per-scenario rationale.
 #
 # Each scenario:
@@ -95,7 +95,7 @@ if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
 fi
 : "${CLUSTER_NAME:=igw-tc-lab}"
 # Grafana admin password: must match what deploy.sh provisioned. NOT
-# the literal "admin" — see config.env.example for why.
+# the literal "admin"; see config.env.example for why.
 : "${GRAFANA_ADMIN_PASSWORD:=lab-igw}"
 CONTEXT="k3d-${CLUSTER_NAME}"
 
@@ -133,6 +133,23 @@ IGW_URL="http://istio-ingressgateway.${NAMESPACE_ISTIO}:80"
 LISTENER_PREFIX='http.outbound_0.0.0.0_8080;'
 LISTENER_RAW='listener.0.0.0.0_8080'
 CLUSTER_PREFIX='cluster.outbound|8080||httpbin.igw-test.svc.cluster.local;'
+
+# --- Preflight --------------------------------------------------------------
+# Without this check, a missing or stale cluster context produces cryptic
+# kubectl errors deep in the first scenario instead of a clear "run
+# ./deploy.sh first" message.
+if ! kubectl --context "${CONTEXT}" get nodes >/dev/null 2>&1; then
+    echo "ERROR: cluster context '${CONTEXT}' is missing or unreachable." >&2
+    echo "       Run ./deploy.sh first to provision the lab." >&2
+    exit 1
+fi
+# Defensively re-delete the IGW HPA. istioctl install creates one with
+# minReplicas=1 + targetCPU=80% that would scale the gateway back during
+# the lab's intentionally-low-CPU scenarios and silently degrade per-pod
+# CV. deploy.sh deletes it once; if anything has recreated it in the
+# interim (manual reapply, istioctl upgrade), we delete it again here.
+kubectl --context "${CONTEXT}" delete hpa istio-ingressgateway \
+    -n "${NAMESPACE_ISTIO}" --ignore-not-found >/dev/null 2>&1 || true
 
 # --- Helpers ----------------------------------------------------------------
 kctl()     { kubectl --context "${CONTEXT}" "$@"; }
@@ -364,7 +381,7 @@ stop_metric_sampler() {
 # Extract p99 from h2dial or fortio output. Returns "n/a" when the
 # expected `# target 99% <value>` line is absent (the load gen errored,
 # or the file is empty). `head -1` exits 0 on empty input, so the
-# previous `|| echo n/a` form never fired -- callers got an empty
+# previous `|| echo n/a` form never fired; callers got an empty
 # string that downstream awk parsed as 0 and that quietly poisoned the
 # H-D evaluation.
 extract_p99() {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# cleanup.sh -- Tear down the lab cluster.
+# cleanup.sh: tear down the lab cluster.
 #
 # Idempotent: safe to run when the cluster already does not exist.
 # ============================================================================
@@ -30,7 +30,7 @@ if [[ -f "${PORTFORWARD_PIDFILE}" ]]; then
     rm -f "${PORTFORWARD_PIDFILE}"
 fi
 
-if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}\s"; then
+if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
     echo "Deleting k3d cluster '${CLUSTER_NAME}'..."
     k3d cluster delete "${CLUSTER_NAME}"
     echo "Done."

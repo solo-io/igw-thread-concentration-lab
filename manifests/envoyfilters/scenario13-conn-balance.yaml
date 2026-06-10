@@ -24,7 +24,7 @@
 #
 # Load profile note: this scenario uses h2dial -mode=distinct with c=300,
 # giving roughly 50 connections per pod with kube-proxy random hashing.
-# At concurrency=2 that is roughly 25 connections per worker -- enough
+# At concurrency=2 that is roughly 25 connections per worker: enough
 # for the binomial-variance signal of the kernel SO_REUSEPORT race to
 # stabilize over a 60s measure window, so ExactBalance's improvement is
 # measurable. Smaller load profiles (c=100, ~8 connections per worker)
@@ -75,8 +75,17 @@ spec:
       value:
         connection_balance_config:
           exact_balance: {}
-  # Keep max_concurrent_streams at the trigger default so the scenario
-  # exercises the same connection cardinality as scenario 2.
+  # Self-describing reassertion of max_concurrent_streams=65536, which
+  # is the Istio default (via PILOT_HTTP2_MAX_CONCURRENT_STREAMS); we
+  # restate it so a reader can see this scenario exercises the same
+  # high-stream regime as scenario 2. Materially a no-op delta: the
+  # ONLY variable this scenario isolates is the listener-level
+  # `connection_balance_config: exact_balance` patch above. The auto-
+  # paired control (13-conn-balance-control) applies scenario1-baseline
+  # and therefore lacks both patches, so the strict comparison is one
+  # knob (exact_balance) but with the HCM block also re-asserted on
+  # one side. Acceptable because the HCM patch is value-equal to the
+  # Istio default.
   - applyTo: NETWORK_FILTER
     match:
       context: GATEWAY

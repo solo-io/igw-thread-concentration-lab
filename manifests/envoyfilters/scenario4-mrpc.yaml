@@ -1,4 +1,4 @@
-# Scenario 4: Fix 2 (H-C) -- max_requests_per_connection rotation
+# Scenario 4: Fix 2 (H-C). max_requests_per_connection rotation.
 #
 # max_concurrent_streams stays at the scenario 2 default (65536) so the
 # only changed variable is max_requests_per_connection at 10000. Scenario

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# cpu_sampler.sh -- background sampler invoked from run-tests.sh.
+# cpu_sampler.sh: background sampler invoked from run-tests.sh.
 #
 # Samples two things every INTERVAL seconds, until the file at
 # SENTINEL_PATH is removed:
 #
-#   1. Per-pod CPU/memory via `kubectl top pod` — the proxy-side view.
+#   1. Per-pod CPU/memory via `kubectl top pod`: the proxy-side view.
 #   2. Per-worker connection counts via Envoy admin
-#      (`listener.0.0.0.0_8080.worker_N.downstream_cx_*`) — the within-pod
+#      (`listener.0.0.0.0_8080.worker_N.downstream_cx_*`): the within-pod
 #      thread-balance view.
 #
 # Why this isn't `top -H` inside the pod: the istio-proxy container

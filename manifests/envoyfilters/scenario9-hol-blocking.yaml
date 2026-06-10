@@ -1,4 +1,4 @@
-# Scenario 9: secondary cause #4 -- HTTP/2 head-of-line blocking on slow streams
+# Scenario 9: secondary cause #4. HTTP/2 head-of-line blocking on slow streams.
 #
 # Hypothesis: even with stream multiplexing, a single connection's
 # stream-level slowness can affect tail latency on other streams sharing
